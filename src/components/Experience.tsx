@@ -57,8 +57,8 @@ export default function Experience() {
   const { ref, inView } = useInView();
 
   return (
-    <section id="experience" className="relative py-32 md:py-40 grid-bg" ref={ref}>
-      <div className="max-w-7xl mx-auto px-6 md:px-12">
+    <section id="experience" className="relative py-20 sm:py-32 md:py-40 grid-bg" ref={ref}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-12">
         <div className={`mb-16 ${inView ? "animate-fade-in-up" : "opacity-0"}`}>
           <span className="text-xs text-[var(--accent-amber)] uppercase tracking-[0.3em] block mb-4">
             04 — Career

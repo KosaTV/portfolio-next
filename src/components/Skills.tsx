@@ -55,11 +55,11 @@ export default function Skills() {
   const { ref, inView } = useInView();
 
   return (
-    <section id="skills" className="relative py-32 md:py-40 grid-bg" ref={ref}>
+    <section id="skills" className="relative py-20 sm:py-32 md:py-40 grid-bg" ref={ref}>
       {/* Ambient glow */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[var(--accent-cyan)] rounded-full opacity-[0.02] blur-[150px]" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 md:w-[600px] md:h-[600px] bg-[var(--accent-cyan)] rounded-full opacity-[0.02] blur-[150px]" />
 
-      <div className="relative z-10 max-w-7xl mx-auto px-6 md:px-12">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 md:px-12">
         <div className={`mb-16 ${inView ? "animate-fade-in-up" : "opacity-0"}`}>
           <span className="text-xs text-[var(--accent-amber)] uppercase tracking-[0.3em] block mb-4">
             02 — Tech Stack

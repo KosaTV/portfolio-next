@@ -61,8 +61,8 @@ export default function Projects() {
   const { ref, inView } = useInView();
 
   return (
-    <section id="projects" className="relative py-32 md:py-40" ref={ref}>
-      <div className="max-w-7xl mx-auto px-6 md:px-12">
+    <section id="projects" className="relative py-20 sm:py-32 md:py-40" ref={ref}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-12">
         <div className={`mb-16 ${inView ? "animate-fade-in-up" : "opacity-0"}`}>
           <span className="text-xs text-[var(--accent-amber)] uppercase tracking-[0.3em] block mb-4">
             03 — Work
@@ -84,7 +84,7 @@ export default function Projects() {
               style={{ animationDelay: `${(i + 1) * 0.15}s` }}
             >
               <div
-                className={`relative p-8 md:p-10 bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--border-hover)] transition-all duration-500 hover-lift ${
+                className={`relative p-5 sm:p-8 md:p-10 bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--border-hover)] transition-all duration-500 hover-lift ${
                   project.accent === "cyan" ? "glow-box" : "glow-box-amber"
                 } hover:bg-[var(--bg-card-hover)]`}
                 style={{
@@ -108,9 +108,9 @@ export default function Projects() {
                     </span>
 
                     {/* Title row */}
-                    <div className="flex items-baseline gap-3 mb-2">
+                    <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3 mb-2">
                       <h3
-                        className={`text-2xl md:text-3xl font-bold tracking-tight ${
+                        className={`text-xl sm:text-2xl md:text-3xl font-bold tracking-tight ${
                           project.accent === "cyan"
                             ? "text-[var(--accent-cyan)]"
                             : "text-[var(--accent-amber)]"

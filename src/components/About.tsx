@@ -25,10 +25,10 @@ export default function About() {
   const { ref, inView } = useInView();
 
   return (
-    <section id="about" className="relative py-32 md:py-40 overflow-hidden" ref={ref}>
+    <section id="about" className="relative py-20 sm:py-32 md:py-40 overflow-hidden" ref={ref}>
       <ParallaxImage />
-      <div className="relative z-10 max-w-7xl mx-auto px-6 md:px-12">
-        <div className="grid md:grid-cols-12 gap-12 md:gap-16 items-start">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 md:px-12">
+        <div className="grid md:grid-cols-12 gap-8 md:gap-16 items-start">
           {/* Left column — heading */}
           <div className="md:col-span-4">
             <div className={`${inView ? "animate-slide-in-left" : "opacity-0"}`}>
@@ -62,7 +62,7 @@ export default function About() {
           {/* Right column — content */}
           <div className="md:col-span-8">
             <div className={`${inView ? "animate-fade-in-up delay-200" : "opacity-0"}`}>
-              <div className="relative p-8 md:p-10 bg-[var(--bg-card)] border border-[var(--border)] gradient-border">
+              <div className="relative p-5 sm:p-8 md:p-10 bg-[var(--bg-card)] border border-[var(--border)] gradient-border">
                 {/* Terminal bar */}
                 <div className="flex items-center gap-2 mb-6 pb-4 border-b border-[var(--border)]">
                   <span className="w-3 h-3 rounded-full bg-[#ff5f57]" />

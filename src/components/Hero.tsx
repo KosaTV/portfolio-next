@@ -30,10 +30,10 @@ export default function Hero() {
       <HeroBackground />
 
       {/* Ambient light blobs */}
-      <div className="absolute top-1/4 -left-32 w-96 h-96 bg-[var(--accent-cyan)] rounded-full opacity-[0.04] blur-[120px] animate-float" />
-      <div className="absolute bottom-1/4 -right-32 w-96 h-96 bg-[var(--accent-amber)] rounded-full opacity-[0.04] blur-[120px] animate-float delay-300" />
+      <div className="absolute top-1/4 -left-32 w-64 h-64 md:w-96 md:h-96 bg-[var(--accent-cyan)] rounded-full opacity-[0.04] blur-[120px] animate-float" />
+      <div className="absolute bottom-1/4 -right-32 w-64 h-64 md:w-96 md:h-96 bg-[var(--accent-amber)] rounded-full opacity-[0.04] blur-[120px] animate-float delay-300" />
 
-      <div className="relative z-10 max-w-5xl mx-auto px-6 md:px-12">
+      <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 md:px-12">
         {/* Terminal line */}
         <div className="animate-fade-in-up text-xs text-[var(--text-muted)] mb-6 tracking-widest uppercase">
           <span className="text-[var(--accent-cyan)]">~</span> / portfolio
@@ -41,7 +41,7 @@ export default function Hero() {
 
         {/* Name */}
         <h1
-          className="animate-fade-in-up delay-200 text-5xl sm:text-7xl md:text-8xl lg:text-9xl font-black tracking-[-0.04em] leading-[0.85]"
+          className="animate-fade-in-up delay-200 text-4xl sm:text-6xl md:text-8xl lg:text-9xl font-black tracking-[-0.04em] leading-[0.85]"
           style={{ fontFamily: "var(--font-display)" }}
         >
           <span className="block text-[var(--text-primary)]">Jacob</span>
@@ -92,7 +92,7 @@ export default function Hero() {
         </div>
 
         {/* Scroll indicator */}
-        <div className="animate-fade-in delay-1200 absolute bottom-12 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
+        <div className="animate-fade-in delay-1200 absolute bottom-8 sm:bottom-12 left-1/2 -translate-x-1/2 hidden sm:flex flex-col items-center gap-2">
           <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-[0.3em]">
             scroll
           </span>
