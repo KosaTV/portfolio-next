@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useLoading } from "./LoadingContext";
 
 const navItems = [
   { label: "about", href: "#about" },
@@ -11,8 +12,10 @@ const navItems = [
 ];
 
 export default function Navigation() {
+  const { state: loadingState } = useLoading();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const logoVisible = loadingState === "done";
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 50);
@@ -33,6 +36,10 @@ export default function Navigation() {
           href="#"
           aria-label="Jacob Chodubski — Home"
           className="flex items-center"
+          style={{
+            opacity: logoVisible ? 1 : 0,
+            transition: "opacity 0.3s ease",
+          }}
         >
           <svg
             width="48"

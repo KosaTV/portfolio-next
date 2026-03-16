@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useLoading } from "./LoadingContext";
 
 const bootLines = [
   { text: "BIOS v3.2.1 — POST check complete", delay: 0 },
@@ -46,11 +47,13 @@ const helpLines = [
 type HistoryEntry = { text: string; color: string };
 
 export default function LoadingScreen() {
+  const { setState: setLoadingState } = useLoading();
   const [visibleLines, setVisibleLines] = useState(0);
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
   const [done, setDone] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
+  const [logoHidden, setLogoHidden] = useState(false);
   const [input, setInput] = useState("");
   const [accepting, setAccepting] = useState(true);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -114,12 +117,17 @@ export default function LoadingScreen() {
   }, [history, ready]);
 
   const launch = useCallback(() => {
+    // Hide logo from loading screen first
+    setLogoHidden(true);
+    // Trigger flying logo animation
+    setLoadingState("logo-flying");
+    // Fade out rest of loading screen
     setFadeOut(true);
     setTimeout(() => {
       document.body.style.overflow = "";
       setDone(true);
     }, 700);
-  }, []);
+  }, [setLoadingState]);
 
   const handleSubmit = () => {
     if (!accepting) return;
@@ -251,7 +259,7 @@ export default function LoadingScreen() {
 
       <div className="relative w-full max-w-xl px-8">
         {/* Logo */}
-        <div className="flex justify-center mb-10">
+        <div className="flex justify-center mb-10" style={{ opacity: logoHidden ? 0 : 1, transition: "opacity 0.15s ease" }}>
           <div className="relative">
             <div
               className="absolute inset-0 blur-[40px] opacity-30"
