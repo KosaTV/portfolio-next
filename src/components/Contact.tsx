@@ -31,18 +31,18 @@ export default function Contact() {
   const [modalOpen, setModalOpen] = useState(false);
 
   return (
-    <section id="contact" className="relative py-32 md:py-40" ref={ref}>
+    <section id="contact" className="relative py-20 sm:py-32 md:py-40" ref={ref}>
       {/* Ambient blobs */}
-      <div className="absolute bottom-0 left-1/4 w-[500px] h-[500px] bg-[var(--accent-cyan)] rounded-full opacity-[0.03] blur-[150px]" />
-      <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-[var(--accent-amber)] rounded-full opacity-[0.03] blur-[150px]" />
+      <div className="absolute bottom-0 left-1/4 w-64 h-64 md:w-[500px] md:h-[500px] bg-[var(--accent-cyan)] rounded-full opacity-[0.03] blur-[150px]" />
+      <div className="absolute bottom-0 right-1/4 w-48 h-48 md:w-[400px] md:h-[400px] bg-[var(--accent-amber)] rounded-full opacity-[0.03] blur-[150px]" />
 
-      <div className="relative z-10 max-w-4xl mx-auto px-6 md:px-12 text-center">
+      <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 md:px-12 text-center">
         <div className={`${inView ? "animate-fade-in-up" : "opacity-0"}`}>
           <span className="text-xs text-[var(--accent-amber)] uppercase tracking-[0.3em] block mb-4">
             05 — Contact
           </span>
           <h2
-            className="text-4xl md:text-6xl lg:text-7xl font-black tracking-tight"
+            className="text-3xl sm:text-4xl md:text-6xl lg:text-7xl font-black tracking-tight"
             style={{ fontFamily: "var(--font-display)" }}
           >
             Let&apos;s build
@@ -93,10 +93,10 @@ export default function Contact() {
               rel="noopener noreferrer"
               className="group flex flex-col items-center gap-2"
             >
-              <span className="w-12 h-12 flex items-center justify-center border border-[var(--border)] text-[var(--text-muted)] group-hover:text-[var(--accent-cyan)] group-hover:border-[var(--accent-cyan-dim)] transition-all duration-300 text-xs font-bold">
+              <span className="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center border border-[var(--border)] text-[var(--text-muted)] group-hover:text-[var(--accent-cyan)] group-hover:border-[var(--accent-cyan-dim)] transition-all duration-300 text-xs font-bold">
                 {link.icon}
               </span>
-              <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest group-hover:text-[var(--text-secondary)] transition-colors">
+              <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest group-hover:text-[var(--text-secondary)] transition-colors hidden sm:block">
                 {link.label}
               </span>
             </a>

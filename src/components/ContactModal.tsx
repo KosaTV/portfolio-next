@@ -115,7 +115,7 @@ export default function ContactModal({ open, onClose }: ContactModalProps) {
             </div>
           ) : (
             /* Form */
-            <form onSubmit={handleSubmit} className="p-6 space-y-5">
+            <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 sm:space-y-5">
               {/* Header */}
               <div className="text-[10px] text-[#555] tracking-wider mb-6">
                 <span className="text-[#00f0d4]">$</span> compose_message --to jacob

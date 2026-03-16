@@ -257,7 +257,7 @@ export default function LoadingScreen() {
         }}
       />
 
-      <div className="relative w-full max-w-xl px-8">
+      <div className="relative w-full max-w-xl px-4 sm:px-8">
         {/* Logo */}
         <div className="flex justify-center mb-10" style={{ opacity: logoHidden ? 0 : 1, transition: "opacity 0.15s ease" }}>
           <div className="relative">
@@ -337,7 +337,7 @@ export default function LoadingScreen() {
           {/* Terminal body — scrollable */}
           <div
             ref={terminalRef}
-            className="p-4 max-h-[350px] overflow-y-auto cursor-text"
+            className="p-3 sm:p-4 max-h-[280px] sm:max-h-[350px] overflow-y-auto cursor-text"
             onClick={() => inputRef.current?.focus()}
             style={{
               scrollbarWidth: "thin",
