@@ -28,8 +28,8 @@ export default function FlyingLogo() {
       requestAnimationFrame(() => {
         setStyle({
           position: "fixed",
-          top: "14px",
-          left: "24px",
+          top: "16px",
+          left: "48px",
           transform: "translate(0, 0) scale(1)",
           opacity: 1,
           transition: "all 0.8s cubic-bezier(0.4, 0, 0.2, 1)",
