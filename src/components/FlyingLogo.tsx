@@ -23,13 +23,18 @@ export default function FlyingLogo() {
     });
     setVisible(true);
 
-    // Next frame: animate to navbar position
+    // Next frame: animate to navbar logo's actual position
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        const target = document.getElementById("navbar-logo");
+        const rect = target?.getBoundingClientRect();
+        const targetTop = rect ? rect.top : 16;
+        const targetLeft = rect ? rect.left : 48;
+
         setStyle({
           position: "fixed",
-          top: "16px",
-          left: "48px",
+          top: `${targetTop}px`,
+          left: `${targetLeft}px`,
           transform: "translate(0, 0) scale(1)",
           opacity: 1,
           transition: "all 0.8s cubic-bezier(0.4, 0, 0.2, 1)",
