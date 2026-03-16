@@ -32,10 +32,32 @@ export default function Navigation() {
         <a
           href="#"
           aria-label="Jacob Chodubski — Home"
-          className="text-[var(--accent-cyan)] font-bold text-lg tracking-tighter"
-          style={{ fontFamily: "var(--font-display)" }}
+          className="flex items-center"
         >
-          JC<span className="text-[var(--accent-amber)]">.</span>
+          <svg
+            width="48"
+            height="32"
+            viewBox="0 0 120 80"
+            fill="none"
+          >
+            <path
+              d="M20 10 L20 50 Q20 65 35 65 L42 65"
+              stroke="var(--accent-cyan)"
+              strokeWidth="5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+            <path
+              d="M100 15 L75 15 Q60 15 60 30 L60 50 Q60 65 75 65 L100 65"
+              stroke="var(--accent-amber)"
+              strokeWidth="5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+            <circle cx="50" cy="40" r="3.5" fill="var(--accent-cyan)" />
+          </svg>
         </a>
 
         {/* Desktop nav */}
