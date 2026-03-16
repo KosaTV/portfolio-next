@@ -33,6 +33,7 @@ export default function Navigation() {
     >
       <div className="max-w-7xl mx-auto px-6 md:px-12 py-4 flex items-center justify-between">
         <a
+          id="navbar-logo"
           href="#"
           aria-label="Jacob Chodubski — Home"
           className="flex items-center"
