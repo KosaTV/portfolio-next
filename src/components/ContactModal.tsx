@@ -46,12 +46,25 @@ export default function ContactModal({ open, onClose }: ContactModalProps) {
     setTimeout(onClose, 300);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSending(true);
-    // Simulate send
-    setTimeout(() => {
-      setSending(false);
+    setError("");
+
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, message }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Something went wrong.");
+      }
+
       setSent(true);
       setTimeout(() => {
         setSent(false);
@@ -60,7 +73,11 @@ export default function ContactModal({ open, onClose }: ContactModalProps) {
         setMessage("");
         handleClose();
       }, 2000);
-    }, 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send message.");
+    } finally {
+      setSending(false);
+    }
   };
 
   if (!open) return null;
@@ -169,6 +186,13 @@ export default function ContactModal({ open, onClose }: ContactModalProps) {
                   style={{ fontFamily: "inherit" }}
                 />
               </div>
+
+              {/* Error */}
+              {error && (
+                <div className="text-[11px] text-[#ff5f57] px-3 py-2 border border-[#ff5f57]/20 bg-[#ff5f57]/5">
+                  <span className="text-[#ff5f57]/60">err:</span> {error}
+                </div>
+              )}
 
               {/* Submit */}
               <div className="flex items-center justify-between pt-2">
