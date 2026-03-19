@@ -30,7 +30,7 @@ export default function About() {
             <div className={`mt-10 space-y-4 ${inView ? "animate-fade-in-up delay-400" : "opacity-0"}`}>
               {[
                 { value: "5+", label: "Years of Experience" },
-                { value: "15+", label: "Apps Delivered" },
+                { value: "50+", label: "Apps Delivered" },
                 { value: "∞", label: "Lines of Coffee" },
               ].map((stat) => (
                 <div key={stat.label} className="flex items-baseline gap-3">
