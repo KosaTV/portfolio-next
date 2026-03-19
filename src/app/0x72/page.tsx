@@ -8,12 +8,18 @@ import { useRouter } from "next/navigation";
 type AppId = "terminal" | "files" | "monitor" | "about" | "notepad";
 type ThemeId = string;
 
+interface WallpaperConfig {
+  background: string;
+  backgroundSize?: string;
+}
+
 interface OSTheme {
   name: string;
   primary: string;
   secondary: string;
   primaryRgb: string;
   secondaryRgb: string;
+  wallpaper?: string; // preset name, only if theme explicitly sets one
 }
 
 // ─── Themes ─────────────────────────────────────────────────────────────────
@@ -27,6 +33,52 @@ function hexToRgb(hex: string): string {
 
 const BUILTIN_THEME_IDS = ["cyber", "crimson", "violet", "matrix", "arctic", "amber"] as const;
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+const WALLPAPER_PRESETS: Record<string, { label: string; generate: (rgb: string) => WallpaperConfig }> = {
+  grid: {
+    label: "Grid lines",
+    generate: (rgb) => ({
+      background: `linear-gradient(rgba(${rgb},0.015) 1px, transparent 1px), linear-gradient(90deg, rgba(${rgb},0.015) 1px, transparent 1px)`,
+      backgroundSize: "48px 48px",
+    }),
+  },
+  diagonal: {
+    label: "Diagonal stripes",
+    generate: (rgb) => ({
+      background: `repeating-linear-gradient(45deg, transparent, transparent 20px, rgba(${rgb},0.03) 20px, rgba(${rgb},0.03) 40px)`,
+    }),
+  },
+  radial: {
+    label: "Center glow",
+    generate: (rgb) => ({
+      background: `radial-gradient(ellipse at 50% 50%, rgba(${rgb},0.06) 0%, transparent 70%)`,
+    }),
+  },
+  columns: {
+    label: "Vertical columns",
+    generate: (rgb) => ({
+      background: `repeating-linear-gradient(90deg, transparent, transparent 30px, rgba(${rgb},0.02) 30px, rgba(${rgb},0.02) 31px)`,
+    }),
+  },
+  aurora: {
+    label: "Horizontal bands",
+    generate: (rgb) => ({
+      background: `linear-gradient(180deg, rgba(${rgb},0.04) 0%, transparent 30%, rgba(${rgb},0.03) 60%, transparent 100%)`,
+    }),
+  },
+  circles: {
+    label: "Concentric circles",
+    generate: (rgb) => ({
+      background: `repeating-radial-gradient(circle at 50% 50%, transparent, transparent 40px, rgba(${rgb},0.02) 40px, rgba(${rgb},0.02) 41px)`,
+    }),
+  },
+  none: {
+    label: "Plain background",
+    generate: () => ({ background: "none" }),
+  },
+};
+
+const WALLPAPER_KEYS = Object.keys(WALLPAPER_PRESETS);
 
 const THEMES: Record<string, OSTheme> = {
   cyber:   { name: "Cyber",   primary: "#00f0d4", secondary: "#f0a500", primaryRgb: "0,240,212",   secondaryRgb: "240,165,0" },
@@ -44,6 +96,9 @@ const ThemeContext = createContext<{
   allThemes: Record<string, OSTheme>;
   customThemeIds: string[];
   reloadThemes: () => Promise<void>;
+  wallpaper: WallpaperConfig;
+  wallpaperPreset: string;
+  setWallpaper: (preset: string) => void;
 }>({
   theme: THEMES.cyber,
   themeId: "cyber",
@@ -51,6 +106,9 @@ const ThemeContext = createContext<{
   allThemes: THEMES,
   customThemeIds: [],
   reloadThemes: async () => {},
+  wallpaper: WALLPAPER_PRESETS.grid.generate("0,240,212"),
+  wallpaperPreset: "grid",
+  setWallpaper: () => {},
 });
 
 interface WindowState {
@@ -62,7 +120,12 @@ interface WindowState {
   w: number;
   h: number;
   minimized: boolean;
+  maximized: boolean;
   zIndex: number;
+  preMaximized?: { x: number; y: number; w: number; h: number };
+  closing?: boolean;
+  minimizing?: boolean;
+  restoring?: boolean;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -172,14 +235,16 @@ export default function SysPage() {
   const [selectedIcons, setSelectedIcons] = useState<Set<AppId>>(new Set());
   const [themeId, setThemeIdRaw] = useState<ThemeId>("cyber");
   const [customThemes, setCustomThemes] = useState<Record<string, OSTheme>>({});
+  const [wallpaperPreset, setWallpaperPresetRaw] = useState("grid");
 
   const allThemes: Record<string, OSTheme> = { ...THEMES, ...customThemes };
   const theme = allThemes[themeId] || THEMES.cyber;
   const customThemeIds = Object.keys(customThemes);
+  const wallpaper = WALLPAPER_PRESETS[wallpaperPreset]?.generate(theme.primaryRgb) || WALLPAPER_PRESETS.grid.generate(theme.primaryRgb);
 
   const reloadThemes = useCallback(async () => {
     const res = await fetch("/api/themes");
-    const data: { themes: Record<string, { id: string; name: string; primary: string; secondary: string }>; activeTheme: string } = await res.json();
+    const data: { themes: Record<string, { id: string; name: string; primary: string; secondary: string; wallpaper?: string }>; activeTheme: string; activeWallpaper?: string } = await res.json();
     const custom: Record<string, OSTheme> = {};
     for (const [id, t] of Object.entries(data.themes)) {
       custom[id] = {
@@ -188,22 +253,42 @@ export default function SysPage() {
         secondary: t.secondary,
         primaryRgb: hexToRgb(t.primary),
         secondaryRgb: hexToRgb(t.secondary),
+        wallpaper: t.wallpaper,
       };
     }
     setCustomThemes(custom);
     if (data.activeTheme && (data.activeTheme in THEMES || data.activeTheme in custom)) {
       setThemeIdRaw(data.activeTheme);
     }
+    if (data.activeWallpaper && WALLPAPER_PRESETS[data.activeWallpaper]) {
+      setWallpaperPresetRaw(data.activeWallpaper);
+    }
+  }, []);
+
+  const setWallpaper = useCallback((preset: string) => {
+    setWallpaperPresetRaw(preset);
+    fetch("/api/themes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activeWallpaper: preset }),
+    }).catch(() => {});
   }, []);
 
   const setThemeId = useCallback((id: ThemeId) => {
     setThemeIdRaw(id);
+    const t = { ...THEMES, ...customThemes }[id];
+    const patch: Record<string, string> = { activeTheme: id };
+    // If the theme has an explicit wallpaper, apply it
+    if (t?.wallpaper && WALLPAPER_PRESETS[t.wallpaper]) {
+      setWallpaperPresetRaw(t.wallpaper);
+      patch.activeWallpaper = t.wallpaper;
+    }
     fetch("/api/themes", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ activeTheme: id }),
+      body: JSON.stringify(patch),
     }).catch(() => {});
-  }, []);
+  }, [customThemes]);
 
   // Load persisted themes + active theme after auth
   useEffect(() => {
@@ -237,6 +322,15 @@ export default function SysPage() {
     setTimeout(() => setBooted(true), lines.length * 400 + 300);
   }, [authed]);
 
+  const fullscreenTriggered = useRef(false);
+  const handleFirstInteraction = () => {
+    if (fullscreenTriggered.current) return;
+    fullscreenTriggered.current = true;
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    }
+  };
+
   const openApp = useCallback(
     (app: AppId) => {
       const id = `${app}-${Date.now()}`;
@@ -253,6 +347,7 @@ export default function SysPage() {
           w: app === "terminal" ? 600 : app === "monitor" ? 500 : app === "about" ? 420 : 520,
           h: app === "terminal" ? 380 : app === "monitor" ? 400 : app === "about" ? 340 : 380,
           minimized: false,
+          maximized: false,
           zIndex: newZ,
         },
       ]);
@@ -260,17 +355,54 @@ export default function SysPage() {
     [topZ]
   );
 
-  const closeWindow = (id: string) => setWindows((prev) => prev.filter((w) => w.id !== id));
+  // Alt+T opens terminal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && e.key === "t") {
+        e.preventDefault();
+        openApp("terminal");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [openApp]);
 
-  const minimizeWindow = (id: string) =>
-    setWindows((prev) => prev.map((w) => (w.id === id ? { ...w, minimized: true } : w)));
+  const closeWindow = (id: string) => {
+    setWindows((prev) => prev.map((w) => (w.id === id ? { ...w, closing: true } : w)));
+    setTimeout(() => setWindows((prev) => prev.filter((w) => w.id !== id)), 150);
+  };
+
+  const minimizeWindow = (id: string) => {
+    setWindows((prev) => prev.map((w) => (w.id === id ? { ...w, minimizing: true } : w)));
+    setTimeout(() => setWindows((prev) => prev.map((w) => (w.id === id ? { ...w, minimized: true, minimizing: false } : w))), 350);
+  };
+
+  const toggleMaximize = (id: string) =>
+    setWindows((prev) => prev.map((w) => {
+      if (w.id !== id) return w;
+      if (w.maximized) {
+        const pre = w.preMaximized || { x: 120, y: 60, w: 600, h: 380 };
+        return { ...w, maximized: false, x: pre.x, y: pre.y, w: pre.w, h: pre.h, preMaximized: undefined };
+      }
+      return { ...w, maximized: true, preMaximized: { x: w.x, y: w.y, w: w.w, h: w.h }, x: 0, y: 0, w: window.innerWidth, h: window.innerHeight - 40 };
+    }));
 
   const focusWindow = (id: string) => {
     const newZ = topZ + 1;
     setTopZ(newZ);
+    const wasMinimized = windows.find((w) => w.id === id)?.minimized;
     setWindows((prev) =>
-      prev.map((w) => (w.id === id ? { ...w, zIndex: newZ, minimized: false } : w))
+      prev.map((w) => {
+        if (w.id !== id) return w;
+        if (w.minimized) {
+          return { ...w, zIndex: newZ, minimized: false, restoring: true };
+        }
+        return { ...w, zIndex: newZ };
+      })
     );
+    if (wasMinimized) {
+      setTimeout(() => setWindows((prev) => prev.map((w) => (w.id === id ? { ...w, restoring: false } : w))), 350);
+    }
   };
 
   const updateWindow = (id: string, updates: Partial<WindowState>) =>
@@ -376,16 +508,17 @@ export default function SysPage() {
   }
 
   return (
-    <ThemeContext.Provider value={{ theme, themeId, setThemeId, allThemes, customThemeIds, reloadThemes }}>
+    <ThemeContext.Provider value={{ theme, themeId, setThemeId, allThemes, customThemeIds, reloadThemes, wallpaper, wallpaperPreset, setWallpaper }}>
       <div
         className="fixed inset-0 overflow-hidden select-none"
         style={{
           background: "#0a0a0a",
           fontFamily: "'JetBrains Mono', monospace",
-          backgroundImage:
-            `linear-gradient(rgba(${theme.primaryRgb},0.015) 1px, transparent 1px), linear-gradient(90deg, rgba(${theme.primaryRgb},0.015) 1px, transparent 1px)`,
-          backgroundSize: "48px 48px",
+          backgroundImage: wallpaper.background,
+          backgroundSize: wallpaper.backgroundSize || undefined,
         }}
+        onMouseDown={handleFirstInteraction}
+        onKeyDown={handleFirstInteraction}
       >
         {/* Scanlines */}
         <div
@@ -462,9 +595,11 @@ export default function SysPage() {
                   win={win}
                   onClose={() => closeWindow(win.id)}
                   onMinimize={() => minimizeWindow(win.id)}
+                  onToggleMaximize={() => toggleMaximize(win.id)}
                   onFocus={() => focusWindow(win.id)}
-                  onMove={(x, y) => updateWindow(win.id, { x, y })}
-                  onResize={(w, h) => updateWindow(win.id, { w, h })}
+                  onMove={(x, y) => updateWindow(win.id, { x, y, maximized: false })}
+                  onResize={(w, h, x, y) => updateWindow(win.id, { w, h, maximized: false, ...(x !== undefined && { x }), ...(y !== undefined && { y }) })}
+                  onSnap={(snap) => updateWindow(win.id, { ...snap, maximized: snap.y === 0 && snap.x === 0 && snap.w === window.innerWidth, preMaximized: { x: win.x, y: win.y, w: win.w, h: win.h } })}
                   desktopRef={desktopRef}
                 />
               )
@@ -480,46 +615,139 @@ export default function SysPage() {
 
 // ─── Window Component ────────────────────────────────────────────────────────
 
+type ResizeEdge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+type SnapZone = "top" | "left" | "right" | null;
+
+const SNAP_THRESHOLD = 8;
+const TASKBAR_H = 40;
+
+const getSnapZone = (e: MouseEvent): SnapZone => {
+  if (e.clientY <= SNAP_THRESHOLD) return "top";
+  if (e.clientX <= SNAP_THRESHOLD) return "left";
+  if (e.clientX >= window.innerWidth - SNAP_THRESHOLD) return "right";
+  return null;
+};
+
+const getSnapRect = (zone: SnapZone) => {
+  const h = window.innerHeight - TASKBAR_H;
+  if (zone === "top") return { x: 0, y: 0, w: window.innerWidth, h };
+  if (zone === "left") return { x: 0, y: 0, w: Math.floor(window.innerWidth / 2), h };
+  if (zone === "right") return { x: Math.floor(window.innerWidth / 2), y: 0, w: Math.floor(window.innerWidth / 2), h };
+  return null;
+};
+
 function Window({
   win,
   onClose,
   onMinimize,
+  onToggleMaximize,
   onFocus,
   onMove,
   onResize,
+  onSnap,
   desktopRef,
 }: {
   win: WindowState;
   onClose: () => void;
   onMinimize: () => void;
+  onToggleMaximize: () => void;
   onFocus: () => void;
   onMove: (x: number, y: number) => void;
-  onResize: (w: number, h: number) => void;
+  onResize: (w: number, h: number, x?: number, y?: number) => void;
+  onSnap: (snap: { x: number; y: number; w: number; h: number }) => void;
   desktopRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const { theme } = useContext(ThemeContext);
+  const windowRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
-  const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null);
+  const resizeRef = useRef<{ startX: number; startY: number; origX: number; origY: number; origW: number; origH: number; edge: ResizeEdge } | null>(null);
+
+  // Calculate transform to move window center to taskbar button
+  const getMinimizeTransform = useCallback(() => {
+    const btn = document.querySelector(`[data-taskbar-id="${win.id}"]`);
+    if (!btn || !windowRef.current) return "scale(0.2) translateY(100vh)";
+    const btnRect = btn.getBoundingClientRect();
+    const btnCX = btnRect.left + btnRect.width / 2;
+    const btnCY = btnRect.top + btnRect.height / 2;
+    const winCX = win.x + win.w / 2;
+    const winCY = win.y + win.h / 2;
+    const dx = btnCX - winCX;
+    const dy = btnCY - winCY;
+    return `translate(${dx}px, ${dy}px) scale(0.05)`;
+  }, [win.id, win.x, win.y, win.w, win.h]);
+
+  const [minimizeTransform, setMinimizeTransform] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (win.minimizing) {
+      setMinimizeTransform(getMinimizeTransform());
+    } else if (win.restoring) {
+      setMinimizeTransform(getMinimizeTransform());
+      requestAnimationFrame(() => requestAnimationFrame(() => setMinimizeTransform(null)));
+    } else {
+      setMinimizeTransform(null);
+    }
+  }, [win.minimizing, win.restoring, getMinimizeTransform]);
+
+  const [snapZone, setSnapZone] = useState<SnapZone>(null);
+  const snapZoneRef = useRef<SnapZone>(null);
+
+  useEffect(() => {
+    snapZoneRef.current = snapZone;
+  }, [snapZone]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (dragRef.current) {
         const dx = e.clientX - dragRef.current.startX;
         const dy = e.clientY - dragRef.current.startY;
-        onMove(dragRef.current.origX + dx, dragRef.current.origY + dy);
+
+        // Unsnap after a small movement threshold
+        if (unsnapPending.current && (Math.abs(dx) > 30 || Math.abs(dy) > 30)) {
+          unsnapPending.current = false;
+          const pre = win.preMaximized!;
+          const newX = e.clientX - pre.w / 2;
+          const newY = e.clientY - 15;
+          dragRef.current = { startX: e.clientX, startY: e.clientY, origX: newX, origY: newY };
+          onResize(pre.w, pre.h, newX, newY);
+          return;
+        }
+
+        if (!unsnapPending.current) {
+          onMove(dragRef.current.origX + dx, dragRef.current.origY + dy);
+          setSnapZone(getSnapZone(e));
+        }
       }
       if (resizeRef.current) {
-        const dx = e.clientX - resizeRef.current.startX;
-        const dy = e.clientY - resizeRef.current.startY;
-        onResize(
-          Math.max(300, resizeRef.current.origW + dx),
-          Math.max(200, resizeRef.current.origH + dy)
-        );
+        const r = resizeRef.current;
+        const dx = e.clientX - r.startX;
+        const dy = e.clientY - r.startY;
+        let newX = r.origX, newY = r.origY, newW = r.origW, newH = r.origH;
+
+        if (r.edge.includes("e")) newW = Math.max(300, r.origW + dx);
+        if (r.edge.includes("s")) newH = Math.max(200, r.origH + dy);
+        if (r.edge.includes("w")) {
+          newW = Math.max(300, r.origW - dx);
+          newX = r.origX + r.origW - newW;
+        }
+        if (r.edge.includes("n")) {
+          newH = Math.max(200, r.origH - dy);
+          newY = r.origY + r.origH - newH;
+        }
+
+        onResize(newW, newH, newX, newY);
       }
     };
     const handleMouseUp = () => {
+      if (dragRef.current && snapZoneRef.current) {
+        const rect = getSnapRect(snapZoneRef.current);
+        if (rect) onSnap(rect);
+      }
       dragRef.current = null;
       resizeRef.current = null;
+      unsnapPending.current = false;
+      setDragging(false);
+      setSnapZone(null);
     };
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
@@ -527,21 +755,63 @@ function Window({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [onMove, onResize]);
+  }, [onMove, onResize, onSnap]);
+
+  const unsnapPending = useRef(false);
 
   const startDrag = (e: React.MouseEvent) => {
     onFocus();
+    setDragging(true);
+    lastSnapZone.current = null;
     dragRef.current = { startX: e.clientX, startY: e.clientY, origX: win.x, origY: win.y };
+    unsnapPending.current = !!win.preMaximized;
   };
 
-  const startResize = (e: React.MouseEvent) => {
+  const startResize = (edge: ResizeEdge) => (e: React.MouseEvent) => {
     e.stopPropagation();
     onFocus();
-    resizeRef.current = { startX: e.clientX, startY: e.clientY, origW: win.w, origH: win.h };
+    setDragging(true);
+    resizeRef.current = { startX: e.clientX, startY: e.clientY, origX: win.x, origY: win.y, origW: win.w, origH: win.h, edge };
   };
 
+  const [dragging, setDragging] = useState(false);
+
+  const snapRect = snapZone ? getSnapRect(snapZone) : null;
+
+  // Track last snap zone so the hide animation goes back to where it came from
+  const lastSnapZone = useRef<SnapZone>(null);
+  useEffect(() => {
+    if (snapZone) lastSnapZone.current = snapZone;
+  }, [snapZone]);
+
+  // Compute collapsed position based on which edge triggered
+  const collapseZone = snapZone || lastSnapZone.current;
+  const collapseRect = collapseZone ? getSnapRect(collapseZone) : null;
+  const hiddenStyle = collapseRect ? {
+    left: collapseZone === "right" ? collapseRect.x + collapseRect.w : collapseRect.x,
+    top: collapseRect.y,
+    width: collapseZone === "left" || collapseZone === "right" ? 0 : collapseRect.w,
+    height: collapseZone === "top" ? 0 : collapseRect.h,
+  } : { left: 0, top: 0, width: 0, height: 0 };
+
   return (
+    <>
     <div
+      className="fixed pointer-events-none z-[9996]"
+      style={{
+        left: snapRect ? snapRect.x + 4 : hiddenStyle.left,
+        top: snapRect ? snapRect.y + 4 : hiddenStyle.top,
+        width: snapRect ? snapRect.w - 8 : hiddenStyle.width,
+        height: snapRect ? snapRect.h - 8 : hiddenStyle.height,
+        border: `2px solid rgba(${theme.primaryRgb},0.4)`,
+        backgroundColor: `rgba(${theme.primaryRgb},0.06)`,
+        borderRadius: 4,
+        opacity: snapRect ? 1 : 0,
+        transition: "all 0.2s ease",
+      }}
+    />
+    <div
+      ref={windowRef}
       className="absolute flex flex-col"
       style={{
         left: win.x,
@@ -549,7 +819,17 @@ function Window({
         width: win.w,
         height: win.h,
         zIndex: win.zIndex,
-        animation: "fadeIn 0.15s ease",
+        ...(win.minimizing || win.restoring
+          ? {
+              transform: minimizeTransform || "none",
+              opacity: minimizeTransform ? 0 : 1,
+              transition: "transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1)",
+              pointerEvents: "none" as const,
+            }
+          : {
+              animation: win.closing ? "windowClose 0.15s ease forwards" : "windowOpen 0.15s ease",
+              transition: dragging ? "none" : "left 0.2s ease, top 0.2s ease, width 0.2s ease, height 0.2s ease",
+            }),
       }}
       onMouseDown={onFocus}
     >
@@ -561,6 +841,7 @@ function Window({
         <div
           className="flex items-center gap-2 px-3 py-2 bg-[#0f0f0f] border-b border-[#1a1a1a] shrink-0 cursor-grab active:cursor-grabbing"
           onMouseDown={startDrag}
+          onDoubleClick={onToggleMaximize}
         >
           <button
             onClick={onClose}
@@ -576,7 +857,7 @@ function Window({
 
         {/* Content */}
         <div className="flex-1 overflow-hidden">
-          {win.app === "terminal" && <TerminalApp />}
+          {win.app === "terminal" && <TerminalApp onExit={onClose} />}
           {win.app === "files" && <FilesApp />}
           {win.app === "monitor" && <MonitorApp />}
           {win.app === "about" && <AboutApp />}
@@ -584,22 +865,25 @@ function Window({
         </div>
       </div>
 
-      {/* Resize handle */}
-      <div
-        className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"
-        onMouseDown={startResize}
-        style={{
-          background: `linear-gradient(135deg, transparent 50%, rgba(${theme.primaryRgb},0.2) 50%)`,
-        }}
-      />
+      {/* Resize edges */}
+      <div className="absolute top-0 left-[5px] right-[5px] h-[5px] cursor-n-resize" onMouseDown={startResize("n")} />
+      <div className="absolute bottom-0 left-[5px] right-[5px] h-[5px] cursor-s-resize" onMouseDown={startResize("s")} />
+      <div className="absolute left-0 top-[5px] bottom-[5px] w-[5px] cursor-w-resize" onMouseDown={startResize("w")} />
+      <div className="absolute right-0 top-[5px] bottom-[5px] w-[5px] cursor-e-resize" onMouseDown={startResize("e")} />
+      {/* Resize corners */}
+      <div className="absolute top-0 left-0 w-[5px] h-[5px] cursor-nw-resize" onMouseDown={startResize("nw")} />
+      <div className="absolute top-0 right-0 w-[5px] h-[5px] cursor-ne-resize" onMouseDown={startResize("ne")} />
+      <div className="absolute bottom-0 left-0 w-[5px] h-[5px] cursor-sw-resize" onMouseDown={startResize("sw")} />
+      <div className="absolute bottom-0 right-0 w-[5px] h-[5px] cursor-se-resize" onMouseDown={startResize("se")} />
     </div>
+    </>
   );
 }
 
 // ─── Terminal App ────────────────────────────────────────────────────────────
 
-function TerminalApp() {
-  const { theme, themeId: activeThemeId, setThemeId, allThemes, customThemeIds, reloadThemes } = useContext(ThemeContext);
+function TerminalApp({ onExit }: { onExit: () => void }) {
+  const { theme, themeId: activeThemeId, setThemeId, allThemes, customThemeIds, reloadThemes, wallpaperPreset: activeWallpaper, setWallpaper } = useContext(ThemeContext);
   const [history, setHistory] = useState<{ text: string; color: string }[]>([
     { text: "JC OS Terminal v1.0", color: "#555" },
     { text: 'Type "help" for commands.\n', color: "#555" },
@@ -610,8 +894,8 @@ function TerminalApp() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Wizard state for theme creation
-  const [wizardStep, setWizardStep] = useState(0); // 0=idle, 1=name, 2=primary, 3=secondary
-  const wizardData = useRef<{ name: string; primary: string; secondary: string }>({ name: "", primary: "", secondary: "" });
+  const [wizardStep, setWizardStep] = useState(0); // 0=idle, 1=name, 2=primary, 3=secondary, 4=wallpaper
+  const wizardData = useRef<{ name: string; primary: string; secondary: string; wallpaper: string }>({ name: "", primary: "", secondary: "", wallpaper: "grid" });
 
   const handleWizardInput = (value: string) => {
     const trimmed = value.trim();
@@ -657,15 +941,43 @@ function TerminalApp() {
         return;
       }
       wizardData.current.secondary = trimmed;
-      addLines([{ text: `  Secondary: ${trimmed}`, color: trimmed }]);
+      const wallpaperOptions = WALLPAPER_KEYS.map((k, i) =>
+        `  ${i + 1}. ${k.padEnd(10)} — ${WALLPAPER_PRESETS[k].label}`
+      );
+      addLines([
+        { text: `  Secondary: ${trimmed}`, color: trimmed },
+        { text: "Select wallpaper (enter number or name):", color: theme.primary },
+        ...wallpaperOptions.map((t) => ({ text: t, color: "#888" })),
+      ]);
+      setWizardStep(4);
+      return;
+    }
 
-      const { name, primary, secondary } = wizardData.current;
+    if (wizardStep === 4) {
+      // Accept by number (1-based) or by name
+      const num = parseInt(trimmed, 10);
+      let preset: string | undefined;
+      if (num >= 1 && num <= WALLPAPER_KEYS.length) {
+        preset = WALLPAPER_KEYS[num - 1];
+      } else if (WALLPAPER_PRESETS[trimmed.toLowerCase()]) {
+        preset = trimmed.toLowerCase();
+      }
+
+      if (!preset) {
+        addLines([{ text: `Invalid selection "${trimmed}". Enter a number (1-${WALLPAPER_KEYS.length}) or preset name:`, color: "#ff5f57" }]);
+        return;
+      }
+
+      wizardData.current.wallpaper = preset;
+      addLines([{ text: `  Wallpaper: ${preset}`, color: "#888" }]);
+
+      const { name, primary, secondary, wallpaper } = wizardData.current;
       const id = name.toLowerCase().replace(/\s+/g, "-");
 
       fetch("/api/themes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, name, primary, secondary }),
+        body: JSON.stringify({ id, name, primary, secondary, wallpaper }),
       })
         .then((res) => res.json())
         .then(async (data) => {
@@ -717,8 +1029,10 @@ function TerminalApp() {
         { text: "  theme <n>   — switch theme", color: "#888" },
         { text: "  theme create — create a custom theme", color: "#888" },
         { text: "  theme delete <n> — delete a custom theme", color: "#888" },
+        { text: "  wallpapers  — list wallpaper presets", color: "#888" },
+        { text: "  wallpaper <n> — change wallpaper", color: "#888" },
         { text: "  clear       — clear screen", color: "#888" },
-        { text: "  exit        — nice try", color: "#888" },
+        { text: "  exit        — close terminal", color: "#888" },
       ]);
       return;
     }
@@ -739,7 +1053,7 @@ function TerminalApp() {
     }
 
     if (command === "exit") {
-      add([{ text: "There is no escape from JC OS. 😈", color: theme.secondary }]);
+      onExit();
       return;
     }
 
@@ -781,6 +1095,37 @@ function TerminalApp() {
       return;
     }
 
+    if (command === "wallpapers") {
+      const lines: { text: string; color: string }[] = [
+        { text: "Available wallpapers:", color: theme.secondary },
+      ];
+      for (const [id, preset] of Object.entries(WALLPAPER_PRESETS)) {
+        const active = id === activeWallpaper;
+        lines.push({
+          text: `  ${active ? "● " : "  "}${id.padEnd(12)} — ${preset.label}`,
+          color: active ? theme.primary : "#888",
+        });
+      }
+      lines.push({ text: '\nUsage: wallpaper <name>', color: "#555" });
+      add(lines);
+      return;
+    }
+
+    if (command === "wallpaper") {
+      const target = args[0]?.toLowerCase();
+      if (!target) {
+        add([{ text: "Usage: wallpaper <name>", color: "#ff5f57" }, { text: 'Run "wallpapers" to see options.', color: "#555" }]);
+        return;
+      }
+      if (WALLPAPER_PRESETS[target]) {
+        setWallpaper(target);
+        add([{ text: `Wallpaper set to ${target}.`, color: theme.primary }]);
+      } else {
+        add([{ text: `wallpaper: "${target}" not found.`, color: "#ff5f57" }, { text: 'Run "wallpapers" to see options.', color: "#555" }]);
+      }
+      return;
+    }
+
     if (command === "theme") {
       const target = args[0]?.toLowerCase();
       if (!target) {
@@ -793,7 +1138,7 @@ function TerminalApp() {
           { text: "── Theme Creator ──", color: theme.secondary },
           { text: "Enter theme name:", color: theme.primary },
         ]);
-        wizardData.current = { name: "", primary: "", secondary: "" };
+        wizardData.current = { name: "", primary: "", secondary: "", wallpaper: "grid" };
         setWizardStep(1);
         return;
       }
@@ -1261,6 +1606,7 @@ function Taskbar({
         {windows.map((win) => (
           <button
             key={win.id}
+            data-taskbar-id={win.id}
             onClick={() => onFocus(win.id)}
             className={`h-7 px-3 text-[10px] tracking-wider flex items-center gap-1.5 rounded transition cursor-pointer ${
               win.minimized ? "text-[#444] hover:bg-white/5" : "text-[#888] bg-white/5"
