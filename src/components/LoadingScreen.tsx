@@ -259,7 +259,7 @@ export default function LoadingScreen() {
 
       <div className="relative w-full max-w-xl px-4 sm:px-8">
         {/* Logo */}
-        <div className="flex justify-center mb-10" style={{ opacity: logoHidden ? 0 : 1, transition: "opacity 0.15s ease" }}>
+        <div className="flex justify-center mb-10" style={{ opacity: logoHidden ? 0 : 1 }}>
           <div className="relative">
             <div
               className="absolute inset-0 blur-[40px] opacity-30"

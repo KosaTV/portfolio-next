@@ -43,11 +43,12 @@ export default function FlyingLogo() {
       });
     });
 
-    // After animation: hide flying logo, show navbar logo
+    // After animation: show navbar logo first, then hide flying logo
     const timer = setTimeout(() => {
-      setVisible(false);
       setState("done");
-    }, 900);
+      // Keep flying logo visible briefly so navbar logo can appear underneath
+      setTimeout(() => setVisible(false), 100);
+    }, 850);
 
     return () => clearTimeout(timer);
   }, [state, setState]);

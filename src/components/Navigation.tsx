@@ -39,7 +39,6 @@ export default function Navigation() {
           className="flex items-center"
           style={{
             opacity: logoVisible ? 1 : 0,
-            transition: "opacity 0.3s ease",
           }}
         >
           <svg
