@@ -1,0 +1,11 @@
+{
+  "themes": {
+    "custom": {
+      "id": "custom",
+      "name": "custom",
+      "primary": "#0040ff",
+      "secondary": "#ff00fb"
+    }
+  },
+  "activeTheme": "custom"
+}
