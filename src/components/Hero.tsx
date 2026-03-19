@@ -51,7 +51,8 @@ export default function Hero() {
         </h1>
 
         {/* Typed subtitle */}
-        <div className="animate-fade-in-up delay-500 mt-8 flex items-center gap-3">
+        <h2 className="sr-only">Software Engineer</h2>
+        <div className="animate-fade-in-up delay-500 mt-8 flex items-center gap-3" aria-hidden="true">
           <span className="text-[var(--accent-amber)] text-sm">{">"}</span>
           <span className="text-lg md:text-xl text-[var(--text-secondary)] tracking-wide">
             {typed}
