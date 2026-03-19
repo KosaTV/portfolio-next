@@ -2,6 +2,8 @@ import {NextResponse} from "next/server";
 import nodemailer from "nodemailer";
 import {contactEmailHtml, contactEmailText} from "./email-template";
 
+export const runtime = "nodejs";
+
 export async function POST(req: Request) {
 	const {name, email, message} = await req.json();
 
@@ -31,7 +33,13 @@ export async function POST(req: Request) {
 
 		return NextResponse.json({success: true});
 	} catch (error) {
-		console.error("Failed to send email:", error);
+		console.error("Failed to send email:", {
+			message: error instanceof Error ? error.message : error,
+			code: (error as any)?.code,
+			command: (error as any)?.command,
+			smtpUser: process.env.SMTP_USER ? "set" : "MISSING",
+			smtpPass: process.env.SMTP_PASS ? "set" : "MISSING",
+		});
 		return NextResponse.json({error: "Failed to send message."}, {status: 500});
 	}
 }
