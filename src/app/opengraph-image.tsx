@@ -83,19 +83,26 @@ export default function OGImage() {
         <div
           style={{
             marginTop: 24,
-            fontSize: 16,
-            color: "#555",
             display: "flex",
-            gap: 16,
+            flexWrap: "wrap",
+            justifyContent: "center",
+            gap: 6,
+            maxWidth: 860,
+            padding: "0 40px",
           }}
         >
-          <span>React</span>
-          <span style={{ color: "#333" }}>·</span>
-          <span>Next.js</span>
-          <span style={{ color: "#333" }}>·</span>
-          <span>TypeScript</span>
-          <span style={{ color: "#333" }}>·</span>
-          <span>Node.js</span>
+          {[
+            "TypeScript", "JavaScript", "React", "Next.js", "React Native",
+            "Astro", "Redux", "Node.js", "Express", "NestJS",
+            "GraphQL", "REST", "PostgreSQL", "MongoDB", "AWS", "Docker",
+            "HTML5", "CSS3", "SCSS", "Figma", "Git", "Jest",
+            "CMS", "CI/CD",
+          ].map((tech, i, arr) => (
+            <div key={tech} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 14, color: "#555" }}>{tech}</span>
+              {i < arr.length - 1 && <span style={{ fontSize: 14, color: "#333" }}>·</span>}
+            </div>
+          ))}
         </div>
 
         {/* Bottom line */}
