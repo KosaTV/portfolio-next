@@ -29,7 +29,7 @@ export default function About() {
             {/* Stats */}
             <div className={`mt-10 space-y-4 ${inView ? "animate-fade-in-up delay-400" : "opacity-0"}`}>
               {[
-                { value: "4+", label: "Years of Experience" },
+                { value: "5+", label: "Years of Experience" },
                 { value: "15+", label: "Apps Delivered" },
                 { value: "∞", label: "Lines of Coffee" },
               ].map((stat) => (
