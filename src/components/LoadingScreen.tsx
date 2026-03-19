@@ -28,18 +28,18 @@ const bootLines = [
 ];
 
 const launchCommands: Record<string, string[]> = {
-  "./start": ["Launching portfolio...", "✓ Session established."],
-  "./launch": ["Igniting thrusters...", "✓ Portfolio deployed."],
-  "./enter": ["Opening gateway...", "✓ Access granted."],
-  "sudo enter": ["[sudo] password accepted.", "✓ Root access granted."],
+  "npm start": ["Launching portfolio...", "✓ Session established."],
+  "sudo enter": ["[sudo] password accepted.", "✓ Access granted."],
+  "sudo launch": ["[sudo] igniting thrusters...", "✓ Portfolio deployed."],
 };
+
+const rootCommands = ["sudo su", "sudo -i"];
 
 const helpLines = [
   { text: "Available commands:", color: "#f0a500" },
-  { text: "  ./start    — launch the portfolio", color: "#888" },
-  { text: "  ./launch   — ignite thrusters", color: "#888" },
-  { text: "  ./enter    — open the gateway", color: "#888" },
-  { text: "  sudo enter — root access", color: "#888" },
+  { text: "  npm start   — launch the portfolio", color: "#888" },
+  { text: "  sudo enter  — enter with root access", color: "#888" },
+  { text: "  sudo launch — ignite thrusters", color: "#888" },
   { text: "", color: "#888" },
   { text: "Type a launch command to enter the site.", color: "#555" },
 ];
@@ -59,9 +59,12 @@ export default function LoadingScreen() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [failCount, setFailCount] = useState(0);
   const [showSkip, setShowSkip] = useState(false);
+  const [passwordMode, setPasswordMode] = useState(false);
+  const [password, setPassword] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
-  const ghostCommand = "./start";
+  const ghostCommand = "npm start";
 
   useEffect(() => {
     bootLines.forEach((line, i) => {
@@ -90,10 +93,12 @@ export default function LoadingScreen() {
 
   // Auto-focus and scroll to bottom
   useEffect(() => {
-    if (ready && inputRef.current) {
+    if (passwordMode && passwordRef.current) {
+      passwordRef.current.focus();
+    } else if (ready && inputRef.current) {
       inputRef.current.focus();
     }
-  }, [ready, history]);
+  }, [ready, history, passwordMode]);
 
   // Show skip after 30s of inactivity on prompt
   useEffect(() => {
@@ -129,6 +134,48 @@ export default function LoadingScreen() {
     }, 700);
   }, [setLoadingState]);
 
+  const handlePasswordSubmit = async () => {
+    const pwd = password;
+    setPassword("");
+    setHistory((prev) => [
+      ...prev,
+      { text: "[sudo] password for jc: ••••••••", color: "#888" },
+    ]);
+
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pwd }),
+      });
+
+      if (!res.ok) {
+        setHistory((prev) => [
+          ...prev,
+          { text: "sudo: Authentication failure.", color: "#ff5f57" },
+        ]);
+        setPasswordMode(false);
+        return;
+      }
+
+      setAccepting(false);
+      setPasswordMode(false);
+      setHistory((prev) => [
+        ...prev,
+        { text: "✓ Root access granted. Entering system...", color: "#00f0d4" },
+      ]);
+      setTimeout(() => {
+        window.location.href = "/0x72";
+      }, 1000);
+    } catch {
+      setHistory((prev) => [
+        ...prev,
+        { text: "sudo: Authentication service unavailable.", color: "#ff5f57" },
+      ]);
+      setPasswordMode(false);
+    }
+  };
+
   const handleSubmit = () => {
     if (!accepting) return;
 
@@ -140,6 +187,12 @@ export default function LoadingScreen() {
       { text: `jc@portfolio:~$ ${input || ghostCommand}`, color: "#00f0d4" },
     ]);
     setInput("");
+
+    // Check if it's a root command (needs password)
+    if (rootCommands.includes(cmd)) {
+      setPasswordMode(true);
+      return;
+    }
 
     // Check if it's a launch command
     const launchMatch = launchCommands[cmd];
@@ -407,8 +460,35 @@ export default function LoadingScreen() {
                   </div>
                 ))}
 
+                {/* Password prompt */}
+                {passwordMode && (
+                  <div className="flex items-center text-[11px] leading-[1.8]">
+                    <span className="text-[#f0a500] shrink-0">
+                      [sudo] password for jc:&nbsp;
+                    </span>
+                    <input
+                      ref={passwordRef}
+                      type="password"
+                      aria-label="Password input"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handlePasswordSubmit();
+                        if (e.key === "Escape") {
+                          setPasswordMode(false);
+                          setPassword("");
+                        }
+                      }}
+                      spellCheck={false}
+                      autoComplete="off"
+                      className="w-full bg-transparent outline-none text-transparent caret-[#f0a500] text-[11px]"
+                      style={{ fontFamily: "inherit" }}
+                    />
+                  </div>
+                )}
+
                 {/* Active prompt — only show if still accepting input */}
-                {accepting && (
+                {accepting && !passwordMode && (
                   <div className="flex items-center text-[11px] leading-[1.8]">
                     <span className="text-[#00f0d4] shrink-0">
                       jc@portfolio:~$&nbsp;
