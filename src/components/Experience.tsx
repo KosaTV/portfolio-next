@@ -1,22 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-
-function useInView(threshold = 0.1) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [inView, setInView] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) setInView(true); },
-      { threshold }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [threshold]);
-  return { ref, inView };
-}
+import { useInView } from "@/hooks/useInView";
 
 const experiences = [
   {
@@ -54,7 +38,7 @@ const experiences = [
 ];
 
 export default function Experience() {
-  const { ref, inView } = useInView();
+  const { ref, inView } = useInView(0.1);
 
   return (
     <section id="experience" className="relative py-20 sm:py-32 md:py-40 grid-bg" ref={ref}>

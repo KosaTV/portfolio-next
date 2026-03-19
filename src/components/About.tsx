@@ -1,28 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import ParallaxImage from "./ParallaxImage";
-
-function useInView(threshold = 0.2) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [inView, setInView] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) setInView(true); },
-      { threshold }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [threshold]);
-
-  return { ref, inView };
-}
+import { useInView } from "@/hooks/useInView";
 
 export default function About() {
-  const { ref, inView } = useInView();
+  const { ref, inView } = useInView(0.2);
 
   return (
     <section id="about" className="relative py-20 sm:py-32 md:py-40 overflow-hidden" ref={ref}>

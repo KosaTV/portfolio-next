@@ -600,7 +600,6 @@ export default function SysPage() {
                   onMove={(x, y) => updateWindow(win.id, { x, y, maximized: false })}
                   onResize={(w, h, x, y) => updateWindow(win.id, { w, h, maximized: false, ...(x !== undefined && { x }), ...(y !== undefined && { y }) })}
                   onSnap={(snap) => updateWindow(win.id, { ...snap, maximized: snap.y === 0 && snap.x === 0 && snap.w === window.innerWidth, preMaximized: { x: win.x, y: win.y, w: win.w, h: win.h } })}
-                  desktopRef={desktopRef}
                 />
               )
           )}
@@ -645,7 +644,6 @@ function Window({
   onMove,
   onResize,
   onSnap,
-  desktopRef,
 }: {
   win: WindowState;
   onClose: () => void;
@@ -655,7 +653,6 @@ function Window({
   onMove: (x: number, y: number) => void;
   onResize: (w: number, h: number, x?: number, y?: number) => void;
   onSnap: (snap: { x: number; y: number; w: number; h: number }) => void;
-  desktopRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const { theme } = useContext(ThemeContext);
   const windowRef = useRef<HTMLDivElement>(null);
@@ -1307,8 +1304,8 @@ function FilesApp() {
             setPath((p) => p.slice(0, -1));
             setSelectedFile(null);
           }}
-          className="text-[#555] transition cursor-pointer"
-          style={{ ["--tw-text-opacity" as string]: 1 }}
+          className="text-[#555] hover:brightness-150 transition cursor-pointer"
+          style={{ color: "#555" }}
           onMouseEnter={(e) => (e.currentTarget.style.color = theme.primary)}
           onMouseLeave={(e) => (e.currentTarget.style.color = "#555")}
         >
@@ -1374,14 +1371,15 @@ function MonitorApp() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const newCpu = Math.max(5, Math.min(95, cpu + (Math.random() - 0.48) * 20));
-      const newMem = Math.max(40, Math.min(85, mem + (Math.random() - 0.5) * 3));
-      setCpu(Math.round(newCpu));
-      setMem(Math.round(newMem));
-      setCpuHistory((prev) => [...prev.slice(1), Math.round(newCpu)]);
+      setCpu((prev) => {
+        const next = Math.round(Math.max(5, Math.min(95, prev + (Math.random() - 0.48) * 20)));
+        setCpuHistory((h) => [...h.slice(1), next]);
+        return next;
+      });
+      setMem((prev) => Math.round(Math.max(40, Math.min(85, prev + (Math.random() - 0.5) * 3))));
     }, 1000);
     return () => clearInterval(interval);
-  }, [cpu, mem]);
+  }, []);
 
   const processes = [
     { name: "next-server", cpu: 12.3, mem: 245 },
@@ -1392,8 +1390,6 @@ function MonitorApp() {
     { name: "creativity-engine", cpu: 99.9, mem: 8192 },
     { name: "sleep-scheduler", cpu: 0.0, mem: 0 },
   ];
-
-  const maxCpu = Math.max(...cpuHistory, 1);
 
   return (
     <div
@@ -1439,7 +1435,7 @@ function MonitorApp() {
               key={i}
               className="flex-1 transition-all duration-300"
               style={{
-                height: `${(val / 100) * 100}%`,
+                height: `${val}%`,
                 background:
                   val > 80
                     ? "#ff5f57"
