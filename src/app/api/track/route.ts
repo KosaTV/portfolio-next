@@ -202,6 +202,9 @@ function parseUserAgent(ua: string) {
 }
 
 export async function GET() {
+	if (process.env.NODE_ENV === "development") {
+		return NextResponse.json([]);
+	}
 	try {
 		const visits = await readVisits();
 		return NextResponse.json(visits);
@@ -211,6 +214,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+	if (process.env.NODE_ENV === "development") {
+		return NextResponse.json({success: true});
+	}
 	try {
 		const body = await req.json();
 		const {ip, userAgent, referrer, page, utmSource, utmMedium, utmCampaign, utmTerm, utmContent} = body;
