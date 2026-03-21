@@ -1,8 +1,51 @@
 import {NextResponse} from "next/server";
 import nodemailer from "nodemailer";
+import fs from "fs/promises";
+import path from "path";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
+
+const VISITS_FILE = path.join(process.cwd(), "data", "visits.json");
+
+interface Visit {
+	id: string;
+	timestamp: string;
+	ip: string;
+	page: string;
+	referrer: string;
+	utmSource: string;
+	utmMedium: string;
+	utmCampaign: string;
+	utmTerm: string;
+	utmContent: string;
+	browser: string;
+	os: string;
+	device: string;
+	country: string;
+	region: string;
+	city: string;
+	isp: string;
+	org: string;
+	lat: number | null;
+	lon: number | null;
+	timezone: string;
+}
+
+async function readVisits(): Promise<Visit[]> {
+	try {
+		const data = await fs.readFile(VISITS_FILE, "utf-8");
+		return JSON.parse(data);
+	} catch {
+		return [];
+	}
+}
+
+async function saveVisit(visit: Visit) {
+	const visits = await readVisits();
+	visits.unshift(visit);
+	await fs.writeFile(VISITS_FILE, JSON.stringify(visits, null, 2));
+}
 
 interface GeoData {
 	ip: string;
@@ -160,14 +203,25 @@ function parseUserAgent(ua: string) {
 	return {browser: browser.trim(), os, device};
 }
 
+export async function GET() {
+	try {
+		const visits = await readVisits();
+		return NextResponse.json(visits);
+	} catch {
+		return NextResponse.json([], {status: 500});
+	}
+}
+
 export async function POST(req: Request) {
 	try {
 		const body = await req.json();
 		const {ip, userAgent, referrer, page, utmSource, utmMedium, utmCampaign, utmTerm, utmContent} = body;
 
 		const geo = await getGeoData(ip);
+		const uaInfo = parseUserAgent(userAgent);
 
-		const timestamp = new Date().toLocaleString("en-US", {
+		const timestamp = new Date().toISOString();
+		const displayTimestamp = new Date().toLocaleString("en-US", {
 			timeZone: "Europe/Warsaw",
 			weekday: "long",
 			year: "numeric",
@@ -177,6 +231,32 @@ export async function POST(req: Request) {
 			minute: "2-digit",
 			second: "2-digit",
 		});
+
+		const visit: Visit = {
+			id: `v_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+			timestamp,
+			ip,
+			page,
+			referrer,
+			utmSource,
+			utmMedium,
+			utmCampaign,
+			utmTerm,
+			utmContent,
+			browser: uaInfo.browser,
+			os: uaInfo.os,
+			device: uaInfo.device,
+			country: geo?.country || "",
+			region: geo?.region || "",
+			city: geo?.city || "",
+			isp: geo?.isp || "",
+			org: geo?.org || "",
+			lat: geo?.lat ?? null,
+			lon: geo?.lon ?? null,
+			timezone: geo?.timezone || "",
+		};
+
+		await saveVisit(visit);
 
 		const source = utmSource || referrer || "Direct";
 
@@ -199,7 +279,7 @@ export async function POST(req: Request) {
 				userAgent,
 				referrer,
 				page,
-				timestamp,
+				timestamp: displayTimestamp,
 				utmSource,
 				utmMedium,
 				utmCampaign,
