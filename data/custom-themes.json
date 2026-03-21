@@ -1,5 +1,50 @@
 {
-  "activeWallpaper": "diagonal",
+  "activeWallpaper": "radial",
   "themes": {},
-  "activeTheme": "arctic"
+  "activeTheme": "glass",
+  "iconPositions": {
+    "terminal": {
+      "x": 12,
+      "y": 12
+    },
+    "files": {
+      "x": 12,
+      "y": 108
+    },
+    "monitor": {
+      "x": 972,
+      "y": 396
+    },
+    "about": {
+      "x": 12,
+      "y": 204
+    },
+    "notepad": {
+      "x": 12,
+      "y": 300
+    },
+    "analytics": {
+      "x": 972,
+      "y": 492
+    },
+    "music": {
+      "x": 876,
+      "y": 492
+    },
+    "clock": {
+      "x": 876,
+      "y": 396
+    },
+    "visitors": {
+      "x": 12,
+      "y": 492
+    }
+  },
+  "alarms": [
+    {
+      "time": "23:11",
+      "enabled": true,
+      "id": 2
+    }
+  ]
 }

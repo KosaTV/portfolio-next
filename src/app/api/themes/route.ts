@@ -4,7 +4,7 @@ import path from "path";
 
 const DATA_PATH = path.join(process.cwd(), "data", "custom-themes.json");
 
-const BUILTIN_IDS = ["cyber", "crimson", "violet", "matrix", "arctic", "amber"];
+const BUILTIN_IDS = ["cyber", "crimson", "violet", "matrix", "arctic", "amber", "glass"];
 
 const WALLPAPER_PRESETS = ["grid", "diagonal", "radial", "columns", "aurora", "circles", "none"];
 
@@ -16,10 +16,18 @@ interface ThemeData {
   wallpaper?: string;
 }
 
+interface Alarm {
+  time: string;
+  enabled: boolean;
+  id: number;
+}
+
 interface StoredData {
   themes: Record<string, ThemeData>;
   activeTheme: string;
   activeWallpaper: string;
+  alarms?: Alarm[];
+  iconPositions?: Record<string, { x: number; y: number }>;
 }
 
 function readData(): StoredData {
@@ -98,19 +106,22 @@ export async function DELETE(req: Request) {
 
 export async function PATCH(req: Request) {
   const body = await req.json();
-  const { activeTheme, activeWallpaper } = body as { activeTheme?: string; activeWallpaper?: string };
-
-  if (!activeTheme && !activeWallpaper) {
-    return NextResponse.json({ error: "Missing field: activeTheme or activeWallpaper" }, { status: 400 });
-  }
+  const { activeTheme, activeWallpaper, alarms, iconPositions } = body as {
+    activeTheme?: string;
+    activeWallpaper?: string;
+    alarms?: Alarm[];
+    iconPositions?: Record<string, { x: number; y: number }>;
+  };
 
   const data = readData();
+  let changed = false;
 
   if (activeTheme) {
     if (!BUILTIN_IDS.includes(activeTheme) && !data.themes[activeTheme]) {
       return NextResponse.json({ error: `Theme "${activeTheme}" not found` }, { status: 404 });
     }
     data.activeTheme = activeTheme;
+    changed = true;
   }
 
   if (activeWallpaper) {
@@ -118,9 +129,24 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: `Invalid wallpaper preset "${activeWallpaper}"` }, { status: 400 });
     }
     data.activeWallpaper = activeWallpaper;
+    changed = true;
+  }
+
+  if (alarms !== undefined) {
+    data.alarms = alarms;
+    changed = true;
+  }
+
+  if (iconPositions !== undefined) {
+    data.iconPositions = iconPositions;
+    changed = true;
+  }
+
+  if (!changed) {
+    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
   writeData(data);
 
-  return NextResponse.json({ success: true, activeTheme: data.activeTheme, activeWallpaper: data.activeWallpaper });
+  return NextResponse.json({ success: true });
 }
