@@ -1,12 +1,12 @@
 import {NextResponse} from "next/server";
 import nodemailer from "nodemailer";
-import fs from "fs/promises";
-import path from "path";
+import {Redis} from "@upstash/redis";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const VISITS_FILE = path.join(process.env.VERCEL ? "/tmp" : process.cwd() + "/data", "visits.json");
+const redis = Redis.fromEnv();
+const VISITS_KEY = "portfolio:visits";
 
 interface Visit {
 	id: string;
@@ -34,17 +34,15 @@ interface Visit {
 
 async function readVisits(): Promise<Visit[]> {
 	try {
-		const data = await fs.readFile(VISITS_FILE, "utf-8");
-		return JSON.parse(data);
+		const visits = await redis.lrange<Visit>(VISITS_KEY, 0, -1);
+		return visits;
 	} catch {
 		return [];
 	}
 }
 
 async function saveVisit(visit: Visit) {
-	const visits = await readVisits();
-	visits.unshift(visit);
-	await fs.writeFile(VISITS_FILE, JSON.stringify(visits, null, 2));
+	await redis.lpush(VISITS_KEY, visit);
 }
 
 interface GeoData {
