@@ -6,7 +6,7 @@ import path from "path";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const VISITS_FILE = path.join(process.cwd(), "data", "visits.json");
+const VISITS_FILE = path.join(process.env.VERCEL ? "/tmp" : process.cwd() + "/data", "visits.json");
 
 interface Visit {
 	id: string;
@@ -256,7 +256,12 @@ export async function POST(req: Request) {
 			timezone: geo?.timezone || "",
 		};
 
-		await saveVisit(visit);
+		// Save visit — don't let storage failure block email
+		try {
+			await saveVisit(visit);
+		} catch (e) {
+			console.error("Failed to save visit:", e);
+		}
 
 		const source = utmSource || referrer || "Direct";
 
