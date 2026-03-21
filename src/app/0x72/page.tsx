@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type AppId = "terminal" | "files" | "monitor" | "about" | "notepad" | "visitors";
+type AppId = "terminal" | "files" | "monitor" | "about" | "notepad" | "visitors" | "music";
 type ThemeId = string;
 
 interface WallpaperConfig {
@@ -137,6 +137,7 @@ const APPS: Record<AppId, { label: string; icon: string }> = {
   about: { label: "About JC OS", icon: "ℹ" },
   notepad: { label: "Notepad", icon: "📝" },
   visitors: { label: "Visitors", icon: "👁" },
+  music: { label: "Music", icon: "♫" },
 };
 
 const DESKTOP_ICONS: { app: AppId; x: number; y: number }[] = [
@@ -146,6 +147,7 @@ const DESKTOP_ICONS: { app: AppId; x: number; y: number }[] = [
   { app: "about", x: 24, y: 312 },
   { app: "notepad", x: 24, y: 408 },
   { app: "visitors", x: 24, y: 504 },
+  { app: "music", x: 24, y: 600 },
 ];
 
 // ─── Fake filesystem ─────────────────────────────────────────────────────────
@@ -346,8 +348,8 @@ export default function SysPage() {
           title: APPS[app].label,
           x: 120 + Math.random() * 200,
           y: 60 + Math.random() * 100,
-          w: app === "terminal" ? 600 : app === "monitor" ? 500 : app === "about" ? 420 : 520,
-          h: app === "terminal" ? 380 : app === "monitor" ? 400 : app === "about" ? 340 : 380,
+          w: app === "terminal" ? 600 : app === "monitor" ? 500 : app === "about" ? 420 : app === "music" ? 480 : 520,
+          h: app === "terminal" ? 380 : app === "monitor" ? 400 : app === "about" ? 340 : app === "music" ? 460 : 380,
           minimized: false,
           maximized: false,
           zIndex: newZ,
@@ -368,6 +370,23 @@ export default function SysPage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [openApp]);
+
+  // Strip ?yt=ok from URL immediately on mount, remember to open music after boot
+  const openMusicAfterBoot = useRef(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("yt") === "ok") {
+      window.history.replaceState({}, "", window.location.pathname);
+      openMusicAfterBoot.current = true;
+    }
+  }, []);
+
+  // Auto-open Music Player once boot finishes
+  useEffect(() => {
+    if (!booted || !openMusicAfterBoot.current) return;
+    openMusicAfterBoot.current = false;
+    openApp("music");
+  }, [booted, openApp]);
 
   const closeWindow = (id: string) => {
     setWindows((prev) => prev.map((w) => (w.id === id ? { ...w, closing: true } : w)));
@@ -708,7 +727,9 @@ function Window({
           const newX = e.clientX - pre.w / 2;
           const newY = e.clientY - 15;
           dragRef.current = { startX: e.clientX, startY: e.clientY, origX: newX, origY: newY };
+          setUnsnapping(true);
           onResize(pre.w, pre.h, newX, newY);
+          setTimeout(() => setUnsnapping(false), 220);
           return;
         }
 
@@ -774,6 +795,7 @@ function Window({
   };
 
   const [dragging, setDragging] = useState(false);
+  const [unsnapping, setUnsnapping] = useState(false);
 
   const snapRect = snapZone ? getSnapRect(snapZone) : null;
 
@@ -827,7 +849,7 @@ function Window({
             }
           : {
               animation: win.closing ? "windowClose 0.15s ease forwards" : "windowOpen 0.15s ease",
-              transition: dragging ? "none" : "left 0.2s ease, top 0.2s ease, width 0.2s ease, height 0.2s ease",
+              transition: unsnapping ? "left 0.2s ease, top 0.2s ease, width 0.2s ease, height 0.2s ease" : dragging ? "none" : "left 0.2s ease, top 0.2s ease, width 0.2s ease, height 0.2s ease",
             }),
       }}
       onMouseDown={onFocus}
@@ -862,6 +884,7 @@ function Window({
           {win.app === "about" && <AboutApp />}
           {win.app === "notepad" && <NotepadApp />}
           {win.app === "visitors" && <VisitorsApp />}
+          {win.app === "music" && <MusicApp />}
         </div>
       </div>
 
@@ -1865,6 +1888,539 @@ function Taskbar({
         <div className="w-1.5 h-1.5 rounded-full bg-[#28c840]" style={{ boxShadow: "0 0 6px #28c840" }} />
         <span className="text-[10px] text-[#555] tabular-nums">{time}</span>
       </div>
+    </div>
+  );
+}
+
+// ─── Music App ───────────────────────────────────────────────────────────────
+
+declare global {
+  interface Window {
+    YT: {
+      Player: new (el: HTMLElement | null, opts: object) => YTPlayer;
+      PlayerState: { PLAYING: number; PAUSED: number; ENDED: number; BUFFERING: number };
+    };
+    onYouTubeIframeAPIReady: () => void;
+  }
+}
+
+interface YTPlayer {
+  loadVideoById(id: string): void;
+  playVideo(): void;
+  pauseVideo(): void;
+  seekTo(seconds: number, allowSeekAhead: boolean): void;
+  setVolume(vol: number): void;
+  getCurrentTime(): number;
+  getDuration(): number;
+  destroy(): void;
+}
+
+interface YTPlaylistItem {
+  id: string;
+  snippet: {
+    title: string;
+    thumbnails?: { medium?: { url: string }; default?: { url: string } };
+    contentDetails?: { itemCount: number };
+  };
+  contentDetails: { itemCount: number };
+}
+
+interface MusicTrack {
+  id: string;
+  title: string;
+  channel: string;
+  thumbnail: string;
+}
+
+function MusicApp() {
+  const { theme } = useContext(ThemeContext);
+
+  type Status = "checking" | "disconnected" | "ready" | "error";
+  const [status, setStatus] = useState<Status>("checking");
+  const [playlists, setPlaylists] = useState<YTPlaylistItem[]>([]);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
+  const [selectedPlaylistTitle, setSelectedPlaylistTitle] = useState("");
+  const [tracks, setTracks] = useState<MusicTrack[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(80);
+  const [view, setView] = useState<"player" | "playlist">("player");
+  const [loadingTracks, setLoadingTracks] = useState(false);
+
+  const playerRef = useRef<YTPlayer | null>(null);
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const currentIndexRef = useRef(0);
+  const tracksRef = useRef<MusicTrack[]>([]);
+  const volumeRef = useRef(80);
+
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { tracksRef.current = tracks; }, [tracks]);
+  useEffect(() => { volumeRef.current = volume; }, [volume]);
+
+  // Check connection on mount
+  useEffect(() => {
+    fetch("/api/youtube/playlists")
+      .then(async (res) => {
+        if (res.status === 401) { setStatus("disconnected"); return; }
+        if (!res.ok) { setStatus("error"); return; }
+        const data = await res.json();
+        setPlaylists(data.items || []);
+        setStatus("ready");
+      })
+      .catch(() => setStatus("error"));
+  }, []);
+
+  // Load YouTube IFrame API once + create player container outside React tree
+  useEffect(() => {
+    const container = document.createElement("div");
+    container.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;pointer-events:none;";
+    document.body.appendChild(container);
+    playerContainerRef.current = container;
+
+    if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+      const script = document.createElement("script");
+      script.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(script);
+    }
+
+    return () => {
+      document.body.removeChild(container);
+      playerContainerRef.current = null;
+    };
+  }, []);
+
+  const clearProgressInterval = useCallback(() => {
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+      progressIntervalRef.current = null;
+    }
+  }, []);
+
+  const createPlayer = useCallback((videoId: string) => {
+    const container = playerContainerRef.current;
+    if (!container || !window.YT?.Player) return;
+
+    if (playerRef.current) {
+      playerRef.current.loadVideoById(videoId);
+      return;
+    }
+
+    playerRef.current = new window.YT.Player(container, {
+      videoId,
+      height: "1",
+      width: "1",
+      playerVars: { autoplay: 1, controls: 0, playsinline: 1 },
+      events: {
+        onReady: (e: { target: YTPlayer }) => {
+          e.target.setVolume(volumeRef.current);
+          setDuration(e.target.getDuration());
+        },
+        onStateChange: (e: { data: number; target: YTPlayer }) => {
+          const s = window.YT.PlayerState;
+          if (e.data === s.PLAYING) {
+            setIsPlaying(true);
+            setDuration(e.target.getDuration());
+            clearProgressInterval();
+            progressIntervalRef.current = setInterval(() => {
+              setProgress(e.target.getCurrentTime());
+              setDuration(e.target.getDuration());
+            }, 500);
+          } else if (e.data === s.PAUSED) {
+            setIsPlaying(false);
+            clearProgressInterval();
+          } else if (e.data === s.ENDED) {
+            setIsPlaying(false);
+            clearProgressInterval();
+            const nextIdx = (currentIndexRef.current + 1) % tracksRef.current.length;
+            const nextTrack = tracksRef.current[nextIdx];
+            if (nextTrack) {
+              e.target.loadVideoById(nextTrack.id);
+              setCurrentIndex(nextIdx);
+              setProgress(0);
+            }
+          }
+        },
+      },
+    });
+  }, [clearProgressInterval]);
+
+  const loadPlaylist = async (playlistId: string, title: string) => {
+    setLoadingTracks(true);
+    setSelectedPlaylistId(playlistId);
+    setSelectedPlaylistTitle(title);
+    setView("player");
+    try {
+      const res = await fetch(`/api/youtube/playlist?id=${encodeURIComponent(playlistId)}`);
+      const data = await res.json();
+      const items: MusicTrack[] = (data.items || [])
+        .filter((item: { snippet?: { resourceId?: { videoId?: string } } }) => item.snippet?.resourceId?.videoId)
+        .map((item: { snippet: { resourceId: { videoId: string }; title: string; videoOwnerChannelTitle?: string; thumbnails?: { medium?: { url: string }; default?: { url: string } } } }) => ({
+          id: item.snippet.resourceId.videoId,
+          title: item.snippet.title,
+          channel: item.snippet.videoOwnerChannelTitle || "",
+          thumbnail:
+            item.snippet.thumbnails?.medium?.url ||
+            item.snippet.thumbnails?.default?.url ||
+            "",
+        }));
+      setTracks(items);
+      setCurrentIndex(0);
+      setProgress(0);
+      setDuration(0);
+      if (items[0]) {
+        if (window.YT?.Player) {
+          createPlayer(items[0].id);
+        } else {
+          const prev = window.onYouTubeIframeAPIReady;
+          window.onYouTubeIframeAPIReady = () => {
+            prev?.();
+            createPlayer(items[0].id);
+          };
+        }
+      }
+    } finally {
+      setLoadingTracks(false);
+    }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      clearProgressInterval();
+      playerRef.current?.destroy();
+      playerRef.current = null;
+    };
+  }, [clearProgressInterval]);
+
+  const togglePlay = () => {
+    if (!playerRef.current) return;
+    if (isPlaying) playerRef.current.pauseVideo();
+    else playerRef.current.playVideo();
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!playerRef.current || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const newTime = ((e.clientX - rect.left) / rect.width) * duration;
+    playerRef.current.seekTo(newTime, true);
+    setProgress(newTime);
+  };
+
+  const handleVolume = (val: number) => {
+    setVolume(val);
+    playerRef.current?.setVolume(val);
+  };
+
+  const handleDisconnect = async () => {
+    await fetch("/api/youtube/disconnect", { method: "POST" });
+    setStatus("disconnected");
+    setPlaylists([]);
+    setTracks([]);
+    setSelectedPlaylistId(null);
+    clearProgressInterval();
+    playerRef.current?.destroy();
+    playerRef.current = null;
+  };
+
+  const fmt = (s: number) => {
+    const m = Math.floor(s / 60);
+    return `${m}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
+  };
+
+  const currentTrack = tracks[currentIndex];
+  const progressPct = duration > 0 ? (progress / duration) * 100 : 0;
+
+  // ── Render helpers ──────────────────────────────────────────────────────────
+
+  if (status === "checking") {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <span className="text-[11px] animate-pulse" style={{ color: theme.primary }}>Connecting...</span>
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3 p-6 text-center">
+        <span className="text-2xl">⚠</span>
+        <p className="text-[11px] text-[#888]">Something went wrong.</p>
+        <button
+          className="text-[10px] px-3 py-1.5 border transition hover:opacity-80 cursor-pointer"
+          style={{ borderColor: theme.primary, color: theme.primary }}
+          onClick={() => setStatus("checking")}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (status === "disconnected") {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-6 p-6 text-center">
+        {/* Hidden YT container lives here always */}
+
+        <div>
+          <div className="text-3xl mb-3" style={{ color: theme.primary, textShadow: `0 0 20px rgba(${theme.primaryRgb},0.4)` }}>♫</div>
+          <div className="text-[13px] text-[#e8e8e8] mb-1">YouTube Music</div>
+          <div className="text-[10px] text-[#555]">Connect your account to play from your playlists</div>
+        </div>
+
+        <button
+          className="flex items-center gap-2 px-4 py-2 border transition hover:opacity-80 cursor-pointer text-[11px]"
+          style={{ borderColor: theme.primary, color: theme.primary }}
+          onClick={() => { window.location.href = "/api/youtube/auth"; }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+          </svg>
+          Connect YouTube
+        </button>
+
+        <p className="text-[9px] text-[#444] max-w-[240px]">
+          You&apos;ll be redirected to Google to authorize read-only access to your YouTube playlists.
+        </p>
+      </div>
+    );
+  }
+
+  // Connected — show playlist picker or player
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* Header bar */}
+      <div className="px-3 py-2 border-b border-[#1a1a1a] bg-[#080808] flex items-center gap-2 shrink-0">
+        <span className="text-[10px] uppercase tracking-wider" style={{ color: theme.primary }}>♫ YouTube Music</span>
+        {selectedPlaylistId && (
+          <>
+            <span className="text-[#333] text-[10px]">/</span>
+            <span className="text-[10px] text-[#666] truncate flex-1">{selectedPlaylistTitle}</span>
+          </>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          {selectedPlaylistId && (
+            <button
+              className="text-[9px] px-2 py-0.5 border border-[#1a1a1a] text-[#555] hover:text-[#888] transition cursor-pointer"
+              onClick={() => { setSelectedPlaylistId(null); setTracks([]); setView("player"); }}
+            >
+              Playlists
+            </button>
+          )}
+          <button
+            className="text-[9px] text-[#333] hover:text-[#ff5f57] transition cursor-pointer"
+            onClick={handleDisconnect}
+            title="Disconnect YouTube"
+          >
+            ✕ Disconnect
+          </button>
+        </div>
+      </div>
+
+      {/* No playlist selected — show picker */}
+      {!selectedPlaylistId && (
+        <div className="flex-1 overflow-y-auto p-3" style={{ scrollbarWidth: "thin", scrollbarColor: "#1a1a1a #0a0a0a" }}>
+          <div className="text-[10px] text-[#555] uppercase tracking-wider mb-3">Your Playlists</div>
+          {playlists.length === 0 ? (
+            <div className="text-[11px] text-[#444] text-center py-8">No playlists found.</div>
+          ) : (
+            <div className="space-y-1">
+              {playlists.map((pl) => (
+                <button
+                  key={pl.id}
+                  className="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/5 transition text-left cursor-pointer border border-transparent hover:border-[#1a1a1a]"
+                  onClick={() => loadPlaylist(pl.id, pl.snippet.title)}
+                >
+                  {pl.snippet.thumbnails?.medium?.url ? (
+                    <img src={pl.snippet.thumbnails.medium.url} alt="" className="w-10 h-7 object-cover shrink-0 opacity-80" />
+                  ) : (
+                    <div className="w-10 h-7 bg-[#111] border border-[#1a1a1a] flex items-center justify-center shrink-0">
+                      <span className="text-[#333] text-xs">♫</span>
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] text-[#aaa] truncate">{pl.snippet.title}</div>
+                    <div className="text-[9px] text-[#444]">{pl.contentDetails?.itemCount ?? "?"} videos</div>
+                  </div>
+                  <span style={{ color: theme.primary }} className="text-[10px] shrink-0">▶</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Playlist selected — player + track list toggle */}
+      {selectedPlaylistId && (
+        <>
+          {/* View toggle */}
+          <div className="flex border-b border-[#1a1a1a] shrink-0">
+            {(["player", "playlist"] as const).map((v) => (
+              <button
+                key={v}
+                className="flex-1 py-1.5 text-[9px] uppercase tracking-wider transition cursor-pointer"
+                style={{
+                  color: view === v ? theme.primary : "#444",
+                  borderBottom: view === v ? `1px solid ${theme.primary}` : "1px solid transparent",
+                  marginBottom: "-1px",
+                }}
+                onClick={() => setView(v)}
+              >
+                {v === "player" ? "Now Playing" : "Tracklist"}
+              </button>
+            ))}
+          </div>
+
+          {/* Loading state */}
+          {loadingTracks && (
+            <div className="flex-1 flex items-center justify-center">
+              <span className="text-[11px] animate-pulse" style={{ color: theme.primary }}>Loading tracks...</span>
+            </div>
+          )}
+
+          {/* Player view */}
+          {!loadingTracks && view === "player" && (
+            <div className="flex-1 flex flex-col items-center justify-between p-5 gap-4">
+              {/* Album art */}
+              <div className="flex-1 flex items-center justify-center w-full">
+                {currentTrack?.thumbnail ? (
+                  <img
+                    src={currentTrack.thumbnail}
+                    alt=""
+                    className="max-h-[160px] object-contain"
+                    style={{ boxShadow: `0 0 40px rgba(${theme.primaryRgb},0.15)` }}
+                  />
+                ) : (
+                  <div
+                    className="w-36 h-24 border border-[#1a1a1a] flex items-center justify-center"
+                    style={{ boxShadow: `0 0 40px rgba(${theme.primaryRgb},0.1)` }}
+                  >
+                    <span className="text-4xl" style={{ color: `rgba(${theme.primaryRgb},0.3)` }}>♫</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Track info */}
+              <div className="w-full text-center">
+                <div className="text-[12px] text-[#e8e8e8] truncate leading-tight mb-0.5">
+                  {currentTrack?.title || "No track"}
+                </div>
+                <div className="text-[10px] text-[#555] truncate">{currentTrack?.channel || ""}</div>
+              </div>
+
+              {/* Progress bar */}
+              <div className="w-full space-y-1">
+                <div
+                  className="w-full h-1 bg-[#1a1a1a] cursor-pointer relative"
+                  onClick={handleSeek}
+                >
+                  <div
+                    className="h-full transition-none"
+                    style={{
+                      width: `${progressPct}%`,
+                      background: `linear-gradient(90deg, ${theme.primary}, ${theme.secondary})`,
+                      boxShadow: `0 0 6px rgba(${theme.primaryRgb},0.4)`,
+                    }}
+                  />
+                </div>
+                <div className="flex justify-between text-[9px] text-[#444] tabular-nums">
+                  <span>{fmt(progress)}</span>
+                  <span>{fmt(duration)}</span>
+                </div>
+              </div>
+
+              {/* Controls */}
+              <div className="flex items-center gap-6">
+                <button
+                  className="text-[#555] hover:brightness-200 transition cursor-pointer text-lg leading-none"
+                  onClick={() => {
+                    const prev = (currentIndex - 1 + tracks.length) % tracks.length;
+                    const track = tracks[prev];
+                    if (track) { playerRef.current?.loadVideoById(track.id); setProgress(0); }
+                    setCurrentIndex(prev);
+                  }}
+                >
+                  ⏮
+                </button>
+                <button
+                  className="w-9 h-9 border flex items-center justify-center transition hover:opacity-80 cursor-pointer"
+                  style={{ borderColor: theme.primary, color: theme.primary, boxShadow: `0 0 12px rgba(${theme.primaryRgb},0.2)` }}
+                  onClick={togglePlay}
+                >
+                  {isPlaying ? "⏸" : "▶"}
+                </button>
+                <button
+                  className="text-[#555] hover:brightness-200 transition cursor-pointer text-lg leading-none"
+                  onClick={() => {
+                    const next = (currentIndex + 1) % tracks.length;
+                    const track = tracks[next];
+                    if (track) { playerRef.current?.loadVideoById(track.id); setProgress(0); }
+                    setCurrentIndex(next);
+                  }}
+                >
+                  ⏭
+                </button>
+              </div>
+
+              {/* Volume */}
+              <div className="w-full flex items-center gap-2">
+                <span className="text-[10px] text-[#444]">🔈</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={volume}
+                  onChange={(e) => handleVolume(Number(e.target.value))}
+                  className="flex-1 h-1 appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(90deg, ${theme.primary} ${volume}%, #1a1a1a ${volume}%)`,
+                    outline: "none",
+                  }}
+                />
+                <span className="text-[10px] text-[#444] tabular-nums w-6">{volume}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Tracklist view */}
+          {!loadingTracks && view === "playlist" && (
+            <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "thin", scrollbarColor: "#1a1a1a #0a0a0a" }}>
+              {tracks.map((track, i) => (
+                <button
+                  key={`${track.id}-${i}`}
+                  className="w-full flex items-center gap-3 px-3 py-2 border-b border-[#0f0f0f] hover:bg-white/5 transition text-left cursor-pointer"
+                  style={{ background: i === currentIndex ? `rgba(${theme.primaryRgb},0.07)` : undefined }}
+                  onClick={() => {
+                    playerRef.current?.loadVideoById(track.id);
+                    setCurrentIndex(i);
+                    setProgress(0);
+                    setView("player");
+                  }}
+                >
+                  {i === currentIndex && isPlaying ? (
+                    <span className="text-[10px] w-5 text-center shrink-0" style={{ color: theme.primary }}>♫</span>
+                  ) : (
+                    <span className="text-[9px] w-5 text-center shrink-0 text-[#444]">{i + 1}</span>
+                  )}
+                  {track.thumbnail ? (
+                    <img src={track.thumbnail} alt="" className="w-8 h-6 object-cover shrink-0 opacity-70" />
+                  ) : (
+                    <div className="w-8 h-6 bg-[#111] shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10px] truncate" style={{ color: i === currentIndex ? theme.primary : "#aaa" }}>
+                      {track.title}
+                    </div>
+                    <div className="text-[9px] text-[#444] truncate">{track.channel}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
