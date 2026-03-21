@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type AppId = "terminal" | "files" | "monitor" | "about" | "notepad";
+type AppId = "terminal" | "files" | "monitor" | "about" | "notepad" | "visitors";
 type ThemeId = string;
 
 interface WallpaperConfig {
@@ -136,6 +136,7 @@ const APPS: Record<AppId, { label: string; icon: string }> = {
   monitor: { label: "System Monitor", icon: "📊" },
   about: { label: "About JC OS", icon: "ℹ" },
   notepad: { label: "Notepad", icon: "📝" },
+  visitors: { label: "Visitors", icon: "👁" },
 };
 
 const DESKTOP_ICONS: { app: AppId; x: number; y: number }[] = [
@@ -144,6 +145,7 @@ const DESKTOP_ICONS: { app: AppId; x: number; y: number }[] = [
   { app: "monitor", x: 24, y: 216 },
   { app: "about", x: 24, y: 312 },
   { app: "notepad", x: 24, y: 408 },
+  { app: "visitors", x: 24, y: 504 },
 ];
 
 // ─── Fake filesystem ─────────────────────────────────────────────────────────
@@ -859,6 +861,7 @@ function Window({
           {win.app === "monitor" && <MonitorApp />}
           {win.app === "about" && <AboutApp />}
           {win.app === "notepad" && <NotepadApp />}
+          {win.app === "visitors" && <VisitorsApp />}
         </div>
       </div>
 
@@ -1551,6 +1554,249 @@ function NotepadApp() {
         }}
         spellCheck={false}
       />
+    </div>
+  );
+}
+
+// ─── Visitors App ───────────────────────────────────────────────────────────
+
+interface VisitorEntry {
+  id: string;
+  timestamp: string;
+  ip: string;
+  page: string;
+  referrer: string;
+  utmSource: string;
+  utmMedium: string;
+  utmCampaign: string;
+  utmTerm: string;
+  utmContent: string;
+  browser: string;
+  os: string;
+  device: string;
+  country: string;
+  region: string;
+  city: string;
+  isp: string;
+  org: string;
+  lat: number | null;
+  lon: number | null;
+  timezone: string;
+}
+
+function VisitorsApp() {
+  const { theme } = useContext(ThemeContext);
+  const [visits, setVisits] = useState<VisitorEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<VisitorEntry | null>(null);
+  const [filter, setFilter] = useState("");
+
+  useEffect(() => {
+    fetch("/api/track")
+      .then((r) => r.json())
+      .then((data) => {
+        setVisits(data);
+        if (data.length > 0) setSelected(data[0]);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = visits.filter((v) => {
+    if (!filter) return true;
+    const q = filter.toLowerCase();
+    return (
+      v.ip.toLowerCase().includes(q) ||
+      v.city.toLowerCase().includes(q) ||
+      v.country.toLowerCase().includes(q) ||
+      v.org.toLowerCase().includes(q) ||
+      v.browser.toLowerCase().includes(q) ||
+      v.utmSource.toLowerCase().includes(q) ||
+      v.page.toLowerCase().includes(q)
+    );
+  });
+
+  const formatTime = (ts: string) => {
+    const d = new Date(ts);
+    return d.toLocaleString("en-GB", {
+      timeZone: "Europe/Warsaw",
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const getSource = (v: VisitorEntry) => v.utmSource || v.referrer || "Direct";
+
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <span className="text-[11px] text-[#555]" style={{ color: theme.primary }}>Loading visits...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Stats bar */}
+      <div className="px-3 py-2 border-b border-[#1a1a1a] bg-[#080808] flex items-center gap-4 shrink-0">
+        <div className="flex items-center gap-1.5">
+          <div className="w-1.5 h-1.5 rounded-full" style={{ background: theme.primary, boxShadow: `0 0 6px ${theme.primary}` }} />
+          <span className="text-[10px] text-[#555] uppercase tracking-wider">Total</span>
+          <span className="text-[11px] tabular-nums" style={{ color: theme.primary }}>{visits.length}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-[#555] uppercase tracking-wider">Today</span>
+          <span className="text-[11px] tabular-nums" style={{ color: theme.secondary }}>
+            {visits.filter((v) => new Date(v.timestamp).toDateString() === new Date().toDateString()).length}
+          </span>
+        </div>
+        <div className="flex-1" />
+        <input
+          type="text"
+          placeholder="Filter..."
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="bg-[#111] border border-[#1a1a1a] text-[10px] text-[#ccc] px-2 py-1 w-32 outline-none"
+          style={{ caretColor: theme.primary }}
+        />
+      </div>
+
+      <div className="flex-1 flex overflow-hidden">
+        {/* List */}
+        <div
+          className="w-[260px] shrink-0 border-r border-[#1a1a1a] overflow-y-auto"
+          style={{ scrollbarWidth: "thin", scrollbarColor: "#1a1a1a #0a0a0a" }}
+        >
+          {filtered.length === 0 ? (
+            <div className="p-4 text-[11px] text-[#444] text-center">No visits found</div>
+          ) : (
+            filtered.map((v) => (
+              <button
+                key={v.id}
+                onClick={() => setSelected(v)}
+                className="w-full text-left px-3 py-2 border-b border-[#0f0f0f] transition cursor-pointer"
+                style={{
+                  background: selected?.id === v.id ? `rgba(${theme.primaryRgb},0.08)` : "transparent",
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-[#aaa] truncate">{v.city || v.ip}{v.country ? `, ${v.country}` : ""}</span>
+                  <span className="text-[9px] text-[#444] shrink-0 ml-2">{formatTime(v.timestamp)}</span>
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: `rgba(${theme.primaryRgb},0.1)`, color: theme.primary }}>
+                    {getSource(v)}
+                  </span>
+                  <span className="text-[9px] text-[#444]">{v.device} — {v.browser}</span>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+
+        {/* Detail panel */}
+        <div
+          className="flex-1 overflow-y-auto p-4"
+          style={{ scrollbarWidth: "thin", scrollbarColor: "#1a1a1a #0a0a0a" }}
+        >
+          {selected ? (
+            <div className="space-y-4">
+              {/* Header */}
+              <div>
+                <div className="text-[13px] text-[#e8e8e8] font-medium">
+                  {selected.city || "Unknown"}{selected.region ? `, ${selected.region}` : ""}{selected.country ? ` — ${selected.country}` : ""}
+                </div>
+                <div className="text-[10px] text-[#555] mt-0.5">
+                  {new Date(selected.timestamp).toLocaleString("en-GB", {
+                    timeZone: "Europe/Warsaw",
+                    weekday: "long",
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })}
+                </div>
+              </div>
+
+              {/* Visit section */}
+              <DetailSection theme={theme} title="Visit">
+                <DetailRow label="Page" value={selected.page} theme={theme} />
+                <DetailRow label="Source" value={getSource(selected)} theme={theme} highlight />
+                <DetailRow label="Referrer" value={selected.referrer || "—"} theme={theme} />
+                <DetailRow label="IP" value={selected.ip} theme={theme} />
+              </DetailSection>
+
+              {/* UTM section */}
+              {(selected.utmSource || selected.utmMedium || selected.utmCampaign) && (
+                <DetailSection theme={theme} title="Campaign">
+                  {selected.utmSource && <DetailRow label="Source" value={selected.utmSource} theme={theme} />}
+                  {selected.utmMedium && <DetailRow label="Medium" value={selected.utmMedium} theme={theme} />}
+                  {selected.utmCampaign && <DetailRow label="Campaign" value={selected.utmCampaign} theme={theme} />}
+                  {selected.utmTerm && <DetailRow label="Term" value={selected.utmTerm} theme={theme} />}
+                  {selected.utmContent && <DetailRow label="Content" value={selected.utmContent} theme={theme} />}
+                </DetailSection>
+              )}
+
+              {/* Device section */}
+              <DetailSection theme={theme} title="Device">
+                <DetailRow label="Browser" value={selected.browser} theme={theme} />
+                <DetailRow label="OS" value={selected.os} theme={theme} />
+                <DetailRow label="Type" value={selected.device} theme={theme} />
+              </DetailSection>
+
+              {/* Location section */}
+              <DetailSection theme={theme} title="Location & Network">
+                <DetailRow label="City" value={selected.city || "—"} theme={theme} />
+                <DetailRow label="Region" value={selected.region || "—"} theme={theme} />
+                <DetailRow label="Country" value={selected.country || "—"} theme={theme} />
+                <DetailRow label="Timezone" value={selected.timezone || "—"} theme={theme} />
+                {selected.lat !== null && <DetailRow label="Coords" value={`${selected.lat}, ${selected.lon}`} theme={theme} />}
+                <DetailRow label="ISP" value={selected.isp || "—"} theme={theme} />
+                <DetailRow label="Org" value={selected.org || "—"} theme={theme} />
+              </DetailSection>
+
+              {/* Map link */}
+              {selected.lat !== null && selected.lon !== null && (
+                <a
+                  href={`https://www.google.com/maps?q=${selected.lat},${selected.lon}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block text-[10px] px-3 py-1.5 border transition hover:opacity-80"
+                  style={{ borderColor: theme.primary, color: theme.primary }}
+                >
+                  View on Google Maps
+                </a>
+              )}
+            </div>
+          ) : (
+            <div className="h-full flex items-center justify-center text-[11px] text-[#444]">
+              Select a visitor to view details
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailSection({ theme, title, children }: { theme: OSTheme; title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: theme.primary, opacity: 0.6 }}>{title}</div>
+      <div className="border border-[#1a1a1a] divide-y divide-[#0f0f0f]">{children}</div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value, theme, highlight }: { label: string; value: string; theme: OSTheme; highlight?: boolean }) {
+  return (
+    <div className="flex px-3 py-1.5 text-[11px]">
+      <span className="w-20 shrink-0 text-[#555]">{label}</span>
+      <span className={highlight ? "" : "text-[#aaa]"} style={highlight ? { color: theme.secondary } : undefined}>{value}</span>
     </div>
   );
 }
