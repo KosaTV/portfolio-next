@@ -606,14 +606,16 @@ export default function SysPage() {
         onMouseDown={handleFirstInteraction}
         onKeyDown={handleFirstInteraction}
       >
-        {/* Scanlines */}
-        <div
-          className="fixed inset-0 pointer-events-none z-[9999]"
-          style={{
-            backgroundImage:
-              `repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(${theme.primaryRgb},0.02) 2px, rgba(${theme.primaryRgb},0.02) 4px)`,
-          }}
-        />
+        {/* Scanlines — disabled for glass theme */}
+        {!theme.glassy && (
+          <div
+            className="fixed inset-0 pointer-events-none z-[9999]"
+            style={{
+              backgroundImage:
+                `repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(${theme.primaryRgb},0.02) 2px, rgba(${theme.primaryRgb},0.02) 4px)`,
+            }}
+          />
+        )}
 
         {/* Selection rectangle */}
         {selection && (
@@ -649,15 +651,16 @@ export default function SysPage() {
                 onClick={() => setSelectedIcons(new Set([app]))}
               >
                 <div
-                  className="w-12 h-12 flex items-center justify-center border bg-[#0f0f0f] text-lg"
+                  className={`w-12 h-12 flex items-center justify-center border text-lg ${theme.glassy ? "backdrop-blur-xl" : "bg-[#0f0f0f]"}`}
                   style={{
+                    ...(theme.glassy ? { background: "rgba(255,255,255,0.06)" } : {}),
                     color: app === "terminal" ? theme.primary : app === "monitor" ? theme.secondary : "#888",
                     boxShadow: isSelected
                       ? `0 0 12px rgba(${theme.primaryRgb},0.2)`
                       : app === "terminal"
                       ? `0 0 12px rgba(${theme.primaryRgb},0.1)`
                       : "none",
-                    borderColor: isSelected ? `rgba(${theme.primaryRgb},0.4)` : "#1a1a1a",
+                    borderColor: isSelected ? `rgba(${theme.primaryRgb},0.4)` : theme.glassy ? "rgba(255,255,255,0.1)" : "#1a1a1a",
                   }}
                 >
                   {APPS[app].icon}
@@ -694,7 +697,8 @@ export default function SysPage() {
         {/* Desktop context menu */}
         {ctxMenu && (
           <div
-            className="fixed z-[9998] min-w-[200px] py-1 bg-[#111]/95 backdrop-blur-md border border-[#222]"
+            className={`fixed z-[9998] min-w-[200px] py-1 backdrop-blur-md border ${theme.glassy ? "border-white/10 backdrop-blur-2xl" : "bg-[#111]/95 border-[#222]"}`}
+            style={theme.glassy ? { background: "rgba(15,15,15,0.5)" } : undefined}
             style={{
               left: Math.min(ctxMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1920) - 220),
               top: Math.min(ctxMenu.y, (typeof window !== "undefined" ? window.innerHeight : 1080) - 300),
@@ -725,8 +729,8 @@ export default function SysPage() {
               </div>
               {ctxSub === "wallpaper" && (
                 <div
-                  className="absolute left-full top-0 min-w-[180px] py-1 bg-[#111]/95 backdrop-blur-md border border-[#222]"
-                  style={{ boxShadow: `0 8px 32px rgba(0,0,0,0.6)` }}
+                  className={`absolute left-full top-0 min-w-[180px] py-1 backdrop-blur-md border ${theme.glassy ? "border-white/10 backdrop-blur-2xl" : "bg-[#111]/95 border-[#222]"}`}
+                  style={{ boxShadow: `0 8px 32px rgba(0,0,0,0.6)`, ...(theme.glassy ? { background: "rgba(15,15,15,0.5)" } : {}) }}
                   onMouseEnter={() => { if (ctxSubTimeout.current) clearTimeout(ctxSubTimeout.current); }}
                   onMouseLeave={() => { ctxSubTimeout.current = setTimeout(() => setCtxSub((s) => s === "wallpaper" ? null : s), 150); }}
                 >
@@ -776,8 +780,8 @@ export default function SysPage() {
               </div>
               {ctxSub === "theme" && (
                 <div
-                  className="absolute left-full top-0 min-w-[160px] py-1 bg-[#111]/95 backdrop-blur-md border border-[#222]"
-                  style={{ boxShadow: `0 8px 32px rgba(0,0,0,0.6)` }}
+                  className={`absolute left-full top-0 min-w-[160px] py-1 backdrop-blur-md border ${theme.glassy ? "border-white/10 backdrop-blur-2xl" : "bg-[#111]/95 border-[#222]"}`}
+                  style={{ boxShadow: `0 8px 32px rgba(0,0,0,0.6)`, ...(theme.glassy ? { background: "rgba(15,15,15,0.5)" } : {}) }}
                   onMouseEnter={() => { if (ctxSubTimeout.current) clearTimeout(ctxSubTimeout.current); }}
                   onMouseLeave={() => { ctxSubTimeout.current = setTimeout(() => setCtxSub((s) => s === "theme" ? null : s), 150); }}
                 >
@@ -1055,12 +1059,17 @@ function Window({
       onMouseDown={onFocus}
     >
       <div
-        className="border border-[#1a1a1a] bg-[#0a0a0a] flex flex-col h-full overflow-hidden"
-        style={{ boxShadow: `0 8px 32px rgba(0,0,0,0.6), 0 0 1px rgba(${theme.primaryRgb},0.1)` }}
+        className={`flex flex-col h-full overflow-hidden ${theme.glassy ? "backdrop-blur-2xl border border-white/10" : "border border-[#1a1a1a] bg-[#0a0a0a]"}`}
+        style={{
+          boxShadow: theme.glassy
+            ? `0 8px 32px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.06)`
+            : `0 8px 32px rgba(0,0,0,0.6), 0 0 1px rgba(${theme.primaryRgb},0.1)`,
+          ...(theme.glassy ? { background: "rgba(15,15,15,0.55)" } : {}),
+        }}
       >
         {/* Title bar */}
         <div
-          className="flex items-center gap-2 px-3 py-2 bg-[#0f0f0f] border-b border-[#1a1a1a] shrink-0 cursor-grab active:cursor-grabbing"
+          className={`flex items-center gap-2 px-3 py-2 border-b shrink-0 cursor-grab active:cursor-grabbing ${theme.glassy ? "bg-white/5 border-white/8" : "bg-[#0f0f0f] border-[#1a1a1a]"}`}
           onMouseDown={startDrag}
           onDoubleClick={onToggleMaximize}
         >
@@ -1524,7 +1533,7 @@ function FilesApp() {
   return (
     <div className="h-full flex flex-col">
       {/* Path bar */}
-      <div className="px-3 py-2 border-b border-[#1a1a1a] bg-[#080808] flex items-center gap-2 text-[10px] shrink-0">
+      <div className={`px-3 py-2 border-b border-[#1a1a1a] ${theme.glassy ? "bg-transparent" : "bg-[#080808]"} flex items-center gap-2 text-[10px] shrink-0`}>
         <button
           onClick={() => {
             setPath((p) => p.slice(0, -1));
@@ -1626,7 +1635,7 @@ function MonitorApp() {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <div className="text-[10px] text-[#555] uppercase tracking-wider mb-1.5">CPU</div>
-          <div className="h-4 bg-[#111] overflow-hidden border border-[#1a1a1a]">
+          <div className={`h-4 overflow-hidden border border-[#1a1a1a] ${theme.glassy ? "bg-white/5" : "bg-[#111]"}`}>
             <div
               className="h-full transition-all duration-700"
               style={{
@@ -1639,7 +1648,7 @@ function MonitorApp() {
         </div>
         <div>
           <div className="text-[10px] text-[#555] uppercase tracking-wider mb-1.5">Memory</div>
-          <div className="h-4 bg-[#111] overflow-hidden border border-[#1a1a1a]">
+          <div className={`h-4 overflow-hidden border border-[#1a1a1a] ${theme.glassy ? "bg-white/5" : "bg-[#111]"}`}>
             <div
               className="h-full transition-all duration-700"
               style={{
@@ -1655,7 +1664,7 @@ function MonitorApp() {
       {/* CPU Graph */}
       <div>
         <div className="text-[10px] text-[#555] uppercase tracking-wider mb-1.5">CPU History</div>
-        <div className="h-20 bg-[#080808] border border-[#1a1a1a] flex items-end gap-px p-1">
+        <div className={`h-20 border border-[#1a1a1a] flex items-end gap-px p-1 ${theme.glassy ? "bg-white/5" : "bg-[#080808]"}`}>
           {cpuHistory.map((val, i) => (
             <div
               key={i}
@@ -1679,7 +1688,7 @@ function MonitorApp() {
       <div>
         <div className="text-[10px] text-[#555] uppercase tracking-wider mb-1.5">Processes</div>
         <div className="border border-[#1a1a1a]">
-          <div className="grid grid-cols-3 gap-2 px-3 py-1.5 bg-[#0f0f0f] text-[9px] text-[#555] uppercase tracking-wider border-b border-[#1a1a1a]">
+          <div className={`grid grid-cols-3 gap-2 px-3 py-1.5 text-[9px] text-[#555] uppercase tracking-wider border-b border-[#1a1a1a] ${theme.glassy ? "bg-transparent" : "bg-[#0f0f0f]"}`}>
             <span>Name</span>
             <span>CPU %</span>
             <span>Mem (MB)</span>
@@ -1762,7 +1771,7 @@ function NotepadApp() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-3 py-1.5 border-b border-[#1a1a1a] bg-[#080808] text-[10px] text-[#555] shrink-0">
+      <div className={`px-3 py-1.5 border-b border-[#1a1a1a] ${theme.glassy ? "bg-transparent" : "bg-[#080808]"} text-[10px] text-[#555] shrink-0`}>
         untitled.md — {text.split("\n").length} lines
       </div>
       <textarea
@@ -1863,7 +1872,7 @@ function VisitorsApp() {
   return (
     <div className="h-full flex flex-col">
       {/* Stats bar */}
-      <div className="px-3 py-2 border-b border-[#1a1a1a] bg-[#080808] flex items-center gap-4 shrink-0">
+      <div className={`px-3 py-2 border-b border-[#1a1a1a] ${theme.glassy ? "bg-transparent" : "bg-[#080808]"} flex items-center gap-4 shrink-0`}>
         <div className="flex items-center gap-1.5">
           <div className="w-1.5 h-1.5 rounded-full" style={{ background: theme.primary, boxShadow: `0 0 6px ${theme.primary}` }} />
           <span className="text-[10px] text-[#555] uppercase tracking-wider">Total</span>
@@ -1881,7 +1890,7 @@ function VisitorsApp() {
           placeholder="Filter..."
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          className="bg-[#111] border border-[#1a1a1a] text-[10px] text-[#ccc] px-2 py-1 w-32 outline-none"
+          className={`border border-[#1a1a1a] text-[10px] text-[#ccc] px-2 py-1 w-32 outline-none ${theme.glassy ? "bg-white/5" : "bg-[#111]"}`}
           style={{ caretColor: theme.primary }}
         />
       </div>
@@ -2050,7 +2059,8 @@ function Taskbar({
 
   return (
     <div
-      className="fixed bottom-0 left-0 right-0 h-10 bg-[#0a0a0a]/95 backdrop-blur-sm border-t border-[#1a1a1a] flex items-center px-2 gap-1 z-[9998]"
+      className={`fixed bottom-0 left-0 right-0 h-10 flex items-center px-2 gap-1 z-[9998] ${theme.glassy ? "backdrop-blur-2xl border-t border-white/10" : "bg-[#0a0a0a]/95 backdrop-blur-sm border-t border-[#1a1a1a]"}`}
+      style={theme.glassy ? { background: "rgba(15,15,15,0.45)" } : undefined}
     >
       {/* Start button */}
       <button
@@ -2642,7 +2652,7 @@ function MusicApp() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header bar */}
-      <div className="px-3 py-2 border-b border-[#1a1a1a] bg-[#080808] flex items-center gap-2 shrink-0">
+      <div className={`px-3 py-2 border-b border-[#1a1a1a] ${theme.glassy ? "bg-transparent" : "bg-[#080808]"} flex items-center gap-2 shrink-0`}>
         <span className="text-[10px] uppercase tracking-wider" style={{ color: theme.primary }}>♫ YouTube Music</span>
         {selectedPlaylistId && (
           <>
