@@ -9,10 +9,13 @@ import Footer from "@/components/Footer";
 import LoadingScreen from "@/components/LoadingScreen";
 import FlyingLogo from "@/components/FlyingLogo";
 import { LoadingProvider } from "@/components/LoadingContext";
+import CustomCursor from "@/components/CustomCursor";
 
 export default function Home() {
   return (
     <LoadingProvider>
+      <div className="custom-cursor">
+      <CustomCursor />
       <LoadingScreen />
       <FlyingLogo />
       <Navigation />
@@ -25,6 +28,7 @@ export default function Home() {
         <Contact />
       </main>
       <Footer />
+      </div>
     </LoadingProvider>
   );
 }

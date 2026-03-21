@@ -45,6 +45,10 @@ html {
   scroll-behavior: smooth;
 }
 
+.custom-cursor, .custom-cursor *, .custom-cursor *::before, .custom-cursor *::after {
+  cursor: none !important;
+}
+
 body {
   background: var(--bg-primary);
   color: var(--text-primary);

@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useRef, useCallback, createContext, useContext } from "react";
 import { useRouter } from "next/navigation";
+import CustomCursor from "@/components/CustomCursor";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type AppId = "terminal" | "files" | "monitor" | "about" | "notepad" | "visitors" | "music";
+type AppId = "terminal" | "files" | "monitor" | "about" | "notepad" | "analytics" | "music" | "clock";
 type ThemeId = string;
 
 interface WallpaperConfig {
@@ -88,7 +89,7 @@ const THEMES: Record<string, OSTheme> = {
   matrix:  { name: "Matrix",  primary: "#00ff41", secondary: "#adff2f", primaryRgb: "0,255,65",    secondaryRgb: "173,255,47" },
   arctic:  { name: "Arctic",  primary: "#66ccff", secondary: "#a0d4ff", primaryRgb: "102,204,255", secondaryRgb: "160,212,255" },
   amber:   { name: "Amber",   primary: "#f0a500", secondary: "#ff6b35", primaryRgb: "240,165,0",   secondaryRgb: "255,107,53" },
-  glass:   { name: "Glass",   primary: "#88ccff", secondary: "#ccddff", primaryRgb: "136,204,255", secondaryRgb: "204,221,255", wallpaper: "none", glassy: true },
+  glass:   { name: "Glass",   primary: "#88ccff", secondary: "#ccddff", primaryRgb: "136,204,255", secondaryRgb: "204,221,255", wallpaper: "radial", glassy: true },
 };
 
 const ThemeContext = createContext<{
@@ -154,18 +155,22 @@ const APPS: Record<AppId, { label: string; icon: string }> = {
   monitor: { label: "System Monitor", icon: "📊" },
   about: { label: "About JC OS", icon: "ℹ" },
   notepad: { label: "Notepad", icon: "📝" },
-  visitors: { label: "Visitors", icon: "👁" },
+  analytics: { label: "Analytics", icon: "📊" },
   music: { label: "Music", icon: "♫" },
+  clock: { label: "Clock", icon: "🕐" },
 };
 
+const ICON_GRID = 96;
+const DESKTOP_PAD = 12;
 const DESKTOP_ICONS: { app: AppId; x: number; y: number }[] = [
-  { app: "terminal", x: 24, y: 24 },
-  { app: "files", x: 24, y: 120 },
-  { app: "monitor", x: 24, y: 216 },
-  { app: "about", x: 24, y: 312 },
-  { app: "notepad", x: 24, y: 408 },
-  { app: "visitors", x: 24, y: 504 },
-  { app: "music", x: 24, y: 600 },
+  { app: "terminal", x: DESKTOP_PAD, y: DESKTOP_PAD },
+  { app: "files", x: DESKTOP_PAD, y: DESKTOP_PAD + ICON_GRID },
+  { app: "monitor", x: DESKTOP_PAD, y: DESKTOP_PAD + ICON_GRID * 2 },
+  { app: "about", x: DESKTOP_PAD, y: DESKTOP_PAD + ICON_GRID * 3 },
+  { app: "notepad", x: DESKTOP_PAD, y: DESKTOP_PAD + ICON_GRID * 4 },
+  { app: "analytics", x: DESKTOP_PAD, y: DESKTOP_PAD + ICON_GRID * 5 },
+  { app: "music", x: DESKTOP_PAD, y: DESKTOP_PAD + ICON_GRID * 6 },
+  { app: "clock", x: DESKTOP_PAD + ICON_GRID, y: DESKTOP_PAD },
 ];
 
 // ─── Fake filesystem ─────────────────────────────────────────────────────────
@@ -248,7 +253,7 @@ export default function SysPage() {
   const router = useRouter();
   const [authed, setAuthed] = useState(false);
   const [windows, setWindows] = useState<WindowState[]>([]);
-  const [topZ, setTopZ] = useState(10);
+
   const [booted, setBooted] = useState(false);
   const [bootLines, setBootLines] = useState<string[]>([]);
   const desktopRef = useRef<HTMLDivElement>(null);
@@ -263,6 +268,32 @@ export default function SysPage() {
   });
   const [selection, setSelection] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [selectedIcons, setSelectedIcons] = useState<Set<AppId>>(new Set());
+  const selectedIconsRef = useRef(selectedIcons);
+  useEffect(() => { selectedIconsRef.current = selectedIcons; }, [selectedIcons]);
+  const [iconPositions, setIconPositionsRaw] = useState<Record<AppId, { x: number; y: number }>>(
+    () => Object.fromEntries(DESKTOP_ICONS.map(({ app, x, y }) => [app, { x, y }])) as Record<AppId, { x: number; y: number }>
+  );
+  const setIconPositions: typeof setIconPositionsRaw = (update) => {
+    setIconPositionsRaw(update);
+    iconPosDirty.current = true;
+  };
+  const iconPosDirty = useRef(false);
+
+  // Alarms (OS-level so they fire even when Clock is closed)
+  const [alarms, setAlarmsRaw] = useState<{ time: string; enabled: boolean; id: number }[]>([]);
+  const setAlarms = (update: React.SetStateAction<{ time: string; enabled: boolean; id: number }[]>) => {
+    setAlarmsRaw((prev) => {
+      const next = typeof update === "function" ? update(prev) : update;
+      fetch("/api/themes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alarms: next }) }).catch(() => {});
+      return next;
+    });
+  };
+  const alarmIdRef = useRef(0);
+  const lastAlarmMinute = useRef("");
+  const [alarmFiring, setAlarmFiring] = useState<string | null>(null);
+  const iconPositionsRef = useRef(iconPositions);
+  useEffect(() => { iconPositionsRef.current = iconPositions; }, [iconPositions]);
+  const iconDragRef = useRef<{ app: AppId; startMX: number; startMY: number; startPositions: Record<AppId, { x: number; y: number }>; didMove: boolean } | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [ctxSub, setCtxSub] = useState<string | null>(null);
   const ctxSubTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -273,6 +304,8 @@ export default function SysPage() {
     else localStorage.removeItem("jcos_custom_wallpaper");
   }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [switcherIndex, setSwitcherIndex] = useState<number | null>(null);
+  const switcherTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [themeId, setThemeIdRaw] = useState<ThemeId>("cyber");
   const [customThemes, setCustomThemes] = useState<Record<string, OSTheme>>({});
   const [wallpaperPreset, setWallpaperPresetRaw] = useState("grid");
@@ -284,7 +317,7 @@ export default function SysPage() {
 
   const reloadThemes = useCallback(async () => {
     const res = await fetch("/api/themes");
-    const data: { themes: Record<string, { id: string; name: string; primary: string; secondary: string; wallpaper?: string }>; activeTheme: string; activeWallpaper?: string } = await res.json();
+    const data: { themes: Record<string, { id: string; name: string; primary: string; secondary: string; wallpaper?: string }>; activeTheme: string; activeWallpaper?: string; alarms?: { time: string; enabled: boolean; id: number }[]; iconPositions?: Record<string, { x: number; y: number }> } = await res.json();
     const custom: Record<string, OSTheme> = {};
     for (const [id, t] of Object.entries(data.themes)) {
       custom[id] = {
@@ -302,6 +335,13 @@ export default function SysPage() {
     }
     if (data.activeWallpaper && WALLPAPER_PRESETS[data.activeWallpaper]) {
       setWallpaperPresetRaw(data.activeWallpaper);
+    }
+    if (data.alarms) {
+      setAlarmsRaw(data.alarms);
+      alarmIdRef.current = data.alarms.reduce((max, a) => Math.max(max, a.id), 0);
+    }
+    if (data.iconPositions) {
+      setIconPositionsRaw((prev) => ({ ...prev, ...data.iconPositions } as typeof prev));
     }
   }, []);
 
@@ -376,25 +416,27 @@ export default function SysPage() {
   const openApp = useCallback(
     (app: AppId) => {
       const id = `${app}-${Date.now()}`;
-      const newZ = topZ + 1;
-      setTopZ(newZ);
-      setWindows((prev) => [
-        ...prev,
-        {
-          id,
-          app,
-          title: APPS[app].label,
-          x: 120 + Math.random() * 200,
-          y: 60 + Math.random() * 100,
-          w: app === "terminal" ? 600 : app === "monitor" ? 500 : app === "about" ? 420 : app === "music" ? 480 : 520,
-          h: app === "terminal" ? 380 : app === "monitor" ? 400 : app === "about" ? 340 : app === "music" ? 460 : 380,
-          minimized: false,
-          maximized: false,
-          zIndex: newZ,
-        },
-      ]);
+      setWindows((prev) => {
+        const maxZ = prev.length > 0 ? Math.max(...prev.map((w) => w.zIndex)) : 10;
+        const newZ = maxZ + 1;
+        return [
+          ...prev,
+          {
+            id,
+            app,
+            title: APPS[app].label,
+            x: 120 + Math.random() * 200,
+            y: 60 + Math.random() * 100,
+            w: app === "terminal" ? 600 : app === "monitor" ? 500 : app === "about" ? 420 : app === "music" ? 480 : app === "clock" ? 400 : 520,
+            h: app === "terminal" ? 380 : app === "monitor" ? 400 : app === "about" ? 340 : app === "music" ? 460 : app === "clock" ? 420 : 380,
+            minimized: false,
+            maximized: false,
+            zIndex: newZ,
+          },
+        ];
+      });
     },
-    [topZ]
+    []
   );
 
   // Alt+T opens terminal
@@ -443,22 +485,21 @@ export default function SysPage() {
         const pre = w.preMaximized || { x: 120, y: 60, w: 600, h: 380 };
         return { ...w, maximized: false, x: pre.x, y: pre.y, w: pre.w, h: pre.h, preMaximized: undefined };
       }
-      return { ...w, maximized: true, preMaximized: { x: w.x, y: w.y, w: w.w, h: w.h }, x: 0, y: 0, w: window.innerWidth, h: window.innerHeight - 40 };
+      return { ...w, maximized: true, preMaximized: { x: w.x, y: w.y, w: w.w, h: w.h }, x: SNAP_GAP, y: SNAP_GAP, w: window.innerWidth - SNAP_GAP * 2, h: window.innerHeight - TASKBAR_H - SNAP_GAP * 2 };
     }));
 
   const focusWindow = (id: string) => {
-    const newZ = topZ + 1;
-    setTopZ(newZ);
-    const wasMinimized = windows.find((w) => w.id === id)?.minimized;
-    setWindows((prev) =>
-      prev.map((w) => {
+    let wasMinimized = false;
+    setWindows((prev) => {
+      const maxZ = Math.max(...prev.map((w) => w.zIndex));
+      const newZ = maxZ + 1;
+      wasMinimized = prev.find((w) => w.id === id)?.minimized ?? false;
+      return prev.map((w) => {
         if (w.id !== id) return w;
-        if (w.minimized) {
-          return { ...w, zIndex: newZ, minimized: false, restoring: true };
-        }
+        if (w.minimized) return { ...w, zIndex: newZ, minimized: false, restoring: true };
         return { ...w, zIndex: newZ };
-      })
-    );
+      });
+    });
     if (wasMinimized) {
       setTimeout(() => setWindows((prev) => prev.map((w) => (w.id === id ? { ...w, restoring: false } : w))), 350);
     }
@@ -498,6 +539,181 @@ export default function SysPage() {
     e.target.value = "";
   };
 
+  // OS-level alarm check (fires even when Clock app is closed)
+  useEffect(() => {
+    const id = setInterval(() => {
+      const timeStr = new Date().toTimeString().slice(0, 5);
+      if (timeStr === lastAlarmMinute.current) return;
+      setAlarmsRaw((currentAlarms) => {
+        currentAlarms.forEach((a) => {
+          if (a.enabled && a.time === timeStr) {
+            setAlarmFiring(a.time);
+            lastAlarmMinute.current = timeStr;
+          }
+        });
+        return currentAlarms;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Debounced icon position save
+  useEffect(() => {
+    const id = setTimeout(() => {
+      if (iconPosDirty.current) {
+        iconPosDirty.current = false;
+        fetch("/api/themes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ iconPositions }) }).catch(() => {});
+      }
+    }, 1000);
+    return () => clearTimeout(id);
+  }, [iconPositions]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const sortedWindowsRef = () => {
+      const visible = windows.filter((w) => !w.closing);
+      return [...visible].sort((a, b) => b.zIndex - a.zIndex);
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+W / Ctrl+Q — close focused window
+      if (e.ctrlKey && (e.key === "q" || e.key === "w")) {
+        e.preventDefault();
+        setWindows((prev) => {
+          const visible = prev.filter((w) => !w.minimized && !w.closing);
+          if (visible.length === 0) return prev;
+          const top = visible.reduce((a, b) => (a.zIndex > b.zIndex ? a : b));
+          return prev.map((w) => (w.id === top.id ? { ...w, closing: true } : w));
+        });
+        setTimeout(() => setWindows((prev) => prev.filter((w) => !w.closing)), 150);
+      }
+
+      // Ctrl+Shift+Tab — cycle windows with switcher
+      if (e.ctrlKey && e.shiftKey && e.key === "Tab") {
+        e.preventDefault();
+        const sorted = sortedWindowsRef();
+        if (sorted.length < 2) return;
+
+        setSwitcherIndex((prev) => {
+          const next = prev === null ? 1 : (prev + 1) % sorted.length;
+          return next;
+        });
+      }
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      // Close switcher when Ctrl or Shift is released
+      if (e.key === "Control" || e.key === "Shift") {
+        setSwitcherIndex((idx) => {
+          if (idx === null) return null;
+          const sorted = sortedWindowsRef();
+          const target = sorted[idx];
+          if (target) {
+            const newZ = Math.max(...windows.map((w) => w.zIndex)) + 1;
+            setWindows((prev) => prev.map((w) =>
+              w.id === target.id
+                ? { ...w, zIndex: newZ, minimized: false, restoring: w.minimized }
+                : w
+            ));
+            setTimeout(() => setWindows((prev) => prev.map((w) => (w.restoring ? { ...w, restoring: false } : w))), 350);
+          }
+          return null;
+        });
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [windows]);
+
+  const handleIconMouseDown = (e: React.MouseEvent, app: AppId) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const isSelected = selectedIconsRef.current.has(app);
+    if (!isSelected) setSelectedIcons(new Set([app]));
+    iconDragRef.current = {
+      app,
+      startMX: e.clientX,
+      startMY: e.clientY,
+      startPositions: Object.fromEntries(
+        Object.entries(iconPositionsRef.current).map(([k, v]) => [k, { ...v }])
+      ) as Record<AppId, { x: number; y: number }>,
+      didMove: false,
+    };
+  };
+
+  useEffect(() => {
+    const getDesktopBounds = () => {
+      const el = desktopRef.current;
+      if (!el) return { maxX: 9999, maxY: 9999 };
+      return { maxX: el.clientWidth - DESKTOP_PAD - 80, maxY: el.clientHeight - DESKTOP_PAD - 80 };
+    };
+
+    const clamp = (v: number, max: number) => Math.max(DESKTOP_PAD, Math.min(v, max));
+
+    const onMove = (e: MouseEvent) => {
+      const drag = iconDragRef.current;
+      if (!drag) return;
+      const dx = e.clientX - drag.startMX;
+      const dy = e.clientY - drag.startMY;
+      if (!drag.didMove && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+      drag.didMove = true;
+
+      const { maxX, maxY } = getDesktopBounds();
+      const getDragged = (app: AppId) =>
+        selectedIconsRef.current.has(app) ? selectedIconsRef.current : new Set([app]);
+
+      const dragged = getDragged(drag.app);
+      setIconPositions((prev) => {
+        const next = { ...prev };
+        for (const id of dragged) {
+          const start = drag.startPositions[id];
+          if (start) {
+            next[id] = { x: clamp(start.x + dx, maxX), y: clamp(start.y + dy, maxY) };
+          }
+        }
+        return next;
+      });
+    };
+
+    const snapToGrid = (v: number, max: number) => {
+      const n = Math.round((v - DESKTOP_PAD) / ICON_GRID);
+      const maxN = Math.floor((max - DESKTOP_PAD) / ICON_GRID);
+      return DESKTOP_PAD + Math.max(0, Math.min(n, maxN)) * ICON_GRID;
+    };
+
+    const onUp = () => {
+      const drag = iconDragRef.current;
+      if (!drag) return;
+      if (!drag.didMove) {
+        setSelectedIcons(new Set([drag.app]));
+      } else {
+        const { maxX, maxY } = getDesktopBounds();
+        const dragged = selectedIconsRef.current.has(drag.app) ? selectedIconsRef.current : new Set([drag.app]);
+        setIconPositions((prev) => {
+          const next = { ...prev };
+          for (const id of dragged) {
+            const pos = next[id];
+            if (pos) next[id] = { x: snapToGrid(pos.x, maxX), y: snapToGrid(pos.y, maxY) };
+          }
+          return next;
+        });
+      }
+      iconDragRef.current = null;
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Check which icons overlap with the selection rectangle
   const getSelectedIcons = useCallback((sel: { x: number; y: number; w: number; h: number }) => {
     const desktopEl = desktopRef.current;
@@ -511,21 +727,21 @@ export default function SysPage() {
     const ICON_H = 80;
 
     for (const icon of DESKTOP_ICONS) {
-      const iconLeft = desktopRect.left + icon.x;
-      const iconTop = desktopRect.top + icon.y;
+      const pos = iconPositionsRef.current[icon.app] ?? icon;
+      const iconLeft = desktopRect.left + pos.x;
+      const iconTop = desktopRect.top + pos.y;
       const iconRight = iconLeft + ICON_W;
       const iconBottom = iconTop + ICON_H;
 
       const selRight = sel.x + sel.w;
       const selBottom = sel.y + sel.h;
 
-      // Check rectangle overlap
       if (sel.x < iconRight && selRight > iconLeft && sel.y < iconBottom && selBottom > iconTop) {
         selected.add(icon.app);
       }
     }
     return selected;
-  }, []);
+  }, []); // reads from iconPositionsRef
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -594,18 +810,25 @@ export default function SysPage() {
     <MusicSyncContext.Provider value={musicSync.current}>
     <ThemeContext.Provider value={{ theme, themeId, setThemeId, allThemes, customThemeIds, reloadThemes, wallpaper, wallpaperPreset, setWallpaper }}>
       <div
-        className="fixed inset-0 overflow-hidden select-none"
+        className={`fixed inset-0 overflow-hidden select-none ${theme.glassy ? "custom-cursor" : ""}`}
         style={{
-          background: "#0a0a0a",
+          backgroundColor: theme.glassy ? undefined : "#0a0a0a",
           fontFamily: "'JetBrains Mono', monospace",
-          cursor: `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='20' viewBox='0 0 16 20'><path d='M1 1 L1 15 L5 11.5 L8.5 18 L10.5 17 L7 10.5 L12 10.5 Z' fill='${theme.primary}' stroke='#000' stroke-width='1' stroke-linejoin='round'/></svg>`)}") 1 1, default`,
+          cursor: theme.glassy
+            ? "none"
+            : `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='17' height='21' viewBox='0 0 17 21'><path d='M1.5 1 L1.5 15.5 L5.5 12 L9 18.5 L11 17.5 L7.5 11 L12.5 11 Z' fill='${theme.primary}' stroke='#000' stroke-width='1' stroke-linejoin='round'/></svg>`)}") 1 1, default`,
           ...(customWallpaperUrl
             ? { backgroundImage: `url(${customWallpaperUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
-            : { backgroundImage: wallpaper.background, backgroundSize: wallpaper.backgroundSize || undefined }),
+            : theme.glassy
+              ? { backgroundImage: `${wallpaper.background}, linear-gradient(135deg, #0a1628 0%, #0f0a28 30%, #1a0a20 60%, #0a1a28 100%)`, backgroundSize: wallpaper.backgroundSize || undefined }
+              : { backgroundImage: wallpaper.background, backgroundSize: wallpaper.backgroundSize || undefined }),
         }}
         onMouseDown={handleFirstInteraction}
         onKeyDown={handleFirstInteraction}
       >
+        {/* Glass cursor */}
+        {theme.glassy && <CustomCursor color={theme.primary} ringSize={30} blur={6} />}
+
         {/* Scanlines — disabled for glass theme */}
         {!theme.glassy && (
           <div
@@ -636,31 +859,28 @@ export default function SysPage() {
         {/* Desktop area */}
         <div ref={desktopRef} className="absolute inset-0 pb-12" onMouseDown={handleDesktopMouseDown} onContextMenu={handleDesktopContextMenu}>
           {/* Desktop icons */}
-          {DESKTOP_ICONS.map(({ app, x, y }) => {
+          {DESKTOP_ICONS.map(({ app }) => {
+            const pos = iconPositions[app];
             const isSelected = selectedIcons.has(app);
             return (
               <button
                 key={app}
-                className="absolute flex flex-col items-center gap-1.5 p-2 rounded transition-colors cursor-pointer hover:bg-white/5"
+                className="absolute flex flex-col items-center gap-1.5 p-2 rounded cursor-pointer hover:bg-white/5"
                 style={{
-                  left: x,
-                  top: y,
+                  left: pos.x,
+                  top: pos.y,
                   backgroundColor: isSelected ? `rgba(${theme.primaryRgb},0.1)` : undefined,
+                  userSelect: "none",
                 }}
                 onDoubleClick={() => openApp(app)}
-                onClick={() => setSelectedIcons(new Set([app]))}
+                onMouseDown={(e) => handleIconMouseDown(e, app)}
               >
                 <div
-                  className={`w-12 h-12 flex items-center justify-center border text-lg ${theme.glassy ? "backdrop-blur-xl" : "bg-[#0f0f0f]"}`}
+                  className={`w-12 h-12 flex items-center justify-center border text-lg ${theme.glassy ? "backdrop-blur-xl rounded-xl" : "bg-[#0f0f0f]"}`}
                   style={{
-                    ...(theme.glassy ? { background: "rgba(255,255,255,0.06)" } : {}),
-                    color: app === "terminal" ? theme.primary : app === "monitor" ? theme.secondary : "#888",
-                    boxShadow: isSelected
-                      ? `0 0 12px rgba(${theme.primaryRgb},0.2)`
-                      : app === "terminal"
-                      ? `0 0 12px rgba(${theme.primaryRgb},0.1)`
-                      : "none",
-                    borderColor: isSelected ? `rgba(${theme.primaryRgb},0.4)` : theme.glassy ? "rgba(255,255,255,0.1)" : "#1a1a1a",
+                    ...(theme.glassy ? { background: "rgba(255,255,255,0.08)", boxShadow: isSelected ? `0 0 16px rgba(${theme.primaryRgb},0.3), inset 0 1px 0 rgba(255,255,255,0.1)` : `inset 0 1px 0 rgba(255,255,255,0.06)` } : { boxShadow: isSelected ? `0 0 12px rgba(${theme.primaryRgb},0.2)` : app === "terminal" ? `0 0 12px rgba(${theme.primaryRgb},0.1)` : "none" }),
+                    color: app === "terminal" ? theme.primary : app === "monitor" ? theme.secondary : theme.glassy ? "rgba(255,255,255,0.7)" : "#888",
+                    borderColor: isSelected ? `rgba(${theme.primaryRgb},0.4)` : theme.glassy ? "rgba(255,255,255,0.12)" : "#1a1a1a",
                   }}
                 >
                   {APPS[app].icon}
@@ -684,9 +904,12 @@ export default function SysPage() {
               onMinimize={() => minimizeWindow(win.id)}
               onToggleMaximize={() => toggleMaximize(win.id)}
               onFocus={() => focusWindow(win.id)}
-              onMove={(x, y) => updateWindow(win.id, { x, y, maximized: false })}
+              onMove={(x, y) => updateWindow(win.id, { x, y, maximized: false, preMaximized: undefined })}
               onResize={(w, h, x, y) => updateWindow(win.id, { w, h, maximized: false, ...(x !== undefined && { x }), ...(y !== undefined && { y }) })}
-              onSnap={(snap) => updateWindow(win.id, { ...snap, maximized: snap.y === 0 && snap.x === 0 && snap.w === window.innerWidth, preMaximized: { x: win.x, y: win.y, w: win.w, h: win.h } })}
+              onSnap={(snap) => updateWindow(win.id, { ...snap, maximized: snap.w >= window.innerWidth - SNAP_GAP * 2, preMaximized: { x: win.x, y: win.y, w: win.w, h: win.h } })}
+              alarms={alarms}
+              setAlarms={setAlarms}
+              alarmIdRef={alarmIdRef}
             />
           ))}
         </div>
@@ -697,12 +920,14 @@ export default function SysPage() {
         {/* Desktop context menu */}
         {ctxMenu && (
           <div
-            className={`fixed z-[9998] min-w-[200px] py-1 backdrop-blur-md border ${theme.glassy ? "border-white/10 backdrop-blur-2xl" : "bg-[#111]/95 border-[#222]"}`}
-            style={theme.glassy ? { background: "rgba(15,15,15,0.5)" } : undefined}
+            className={`fixed z-[9998] min-w-[200px] py-1.5 backdrop-blur-md border ${theme.glassy ? "border-white/15 backdrop-blur-2xl rounded-xl" : "bg-[#111]/95 border-[#222]"}`}
             style={{
               left: Math.min(ctxMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1920) - 220),
               top: Math.min(ctxMenu.y, (typeof window !== "undefined" ? window.innerHeight : 1080) - 300),
-              boxShadow: `0 8px 32px rgba(0,0,0,0.6), 0 0 1px rgba(${theme.primaryRgb},0.15)`,
+              boxShadow: theme.glassy
+                ? `0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06), inset 0 1px 0 rgba(255,255,255,0.08)`
+                : `0 8px 32px rgba(0,0,0,0.6), 0 0 1px rgba(${theme.primaryRgb},0.15)`,
+              ...(theme.glassy ? { background: "rgba(20,20,30,0.5)" } : {}),
             }}
           >
             {/* Open terminal */}
@@ -729,8 +954,8 @@ export default function SysPage() {
               </div>
               {ctxSub === "wallpaper" && (
                 <div
-                  className={`absolute left-full top-0 min-w-[180px] py-1 backdrop-blur-md border ${theme.glassy ? "border-white/10 backdrop-blur-2xl" : "bg-[#111]/95 border-[#222]"}`}
-                  style={{ boxShadow: `0 8px 32px rgba(0,0,0,0.6)`, ...(theme.glassy ? { background: "rgba(15,15,15,0.5)" } : {}) }}
+                  className={`absolute left-full top-0 min-w-[180px] py-1.5 backdrop-blur-md border ${theme.glassy ? "border-white/15 backdrop-blur-2xl rounded-xl" : "bg-[#111]/95 border-[#222]"}`}
+                  style={{ boxShadow: theme.glassy ? `0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08)` : `0 8px 32px rgba(0,0,0,0.6)`, ...(theme.glassy ? { background: "rgba(20,20,30,0.5)" } : {}) }}
                   onMouseEnter={() => { if (ctxSubTimeout.current) clearTimeout(ctxSubTimeout.current); }}
                   onMouseLeave={() => { ctxSubTimeout.current = setTimeout(() => setCtxSub((s) => s === "wallpaper" ? null : s), 150); }}
                 >
@@ -780,8 +1005,8 @@ export default function SysPage() {
               </div>
               {ctxSub === "theme" && (
                 <div
-                  className={`absolute left-full top-0 min-w-[160px] py-1 backdrop-blur-md border ${theme.glassy ? "border-white/10 backdrop-blur-2xl" : "bg-[#111]/95 border-[#222]"}`}
-                  style={{ boxShadow: `0 8px 32px rgba(0,0,0,0.6)`, ...(theme.glassy ? { background: "rgba(15,15,15,0.5)" } : {}) }}
+                  className={`absolute left-full top-0 min-w-[160px] py-1.5 backdrop-blur-md border ${theme.glassy ? "border-white/15 backdrop-blur-2xl rounded-xl" : "bg-[#111]/95 border-[#222]"}`}
+                  style={{ boxShadow: theme.glassy ? `0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08)` : `0 8px 32px rgba(0,0,0,0.6)`, ...(theme.glassy ? { background: "rgba(20,20,30,0.5)" } : {}) }}
                   onMouseEnter={() => { if (ctxSubTimeout.current) clearTimeout(ctxSubTimeout.current); }}
                   onMouseLeave={() => { ctxSubTimeout.current = setTimeout(() => setCtxSub((s) => s === "theme" ? null : s), 150); }}
                 >
@@ -815,6 +1040,72 @@ export default function SysPage() {
         {/* Taskbar */}
         <Taskbar windows={windows} onFocus={focusWindow} onOpen={openApp} />
 
+        {/* Alarm notification (OS-level) */}
+        {alarmFiring && (
+          <div className="fixed inset-0 z-[10002] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }}>
+            <div
+              className="flex flex-col items-center gap-4 p-8 rounded-2xl"
+              style={{
+                background: theme.glassy ? "rgba(20,20,30,0.9)" : "rgba(10,10,10,0.95)",
+                border: `1px solid rgba(${theme.primaryRgb},0.3)`,
+                boxShadow: `0 0 60px rgba(${theme.primaryRgb},0.2), 0 16px 64px rgba(0,0,0,0.5)`,
+              }}
+            >
+              <div className="text-4xl">🔔</div>
+              <div className="text-3xl tabular-nums font-light" style={{ color: theme.primary }}>{alarmFiring}</div>
+              <div className="text-[11px] uppercase tracking-wider" style={{ color: "#888" }}>Alarm</div>
+              <button
+                onClick={() => setAlarmFiring(null)}
+                className="px-6 py-2 text-[11px] uppercase tracking-wider rounded-lg transition cursor-pointer"
+                style={{ background: `rgba(${theme.primaryRgb},0.15)`, color: theme.primary, border: `1px solid rgba(${theme.primaryRgb},0.3)` }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Window switcher overlay */}
+        {switcherIndex !== null && (() => {
+          const sorted = [...windows.filter((w) => !w.closing)].sort((a, b) => b.zIndex - a.zIndex);
+          return (
+            <div className="fixed inset-0 z-[10001] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.3)" }}>
+              <div
+                className={`flex gap-3 px-5 py-4 rounded-2xl border ${theme.glassy ? "border-white/15" : "border-[#222]"}`}
+                style={{
+                  background: theme.glassy ? "rgba(20,20,30,0.7)" : "rgba(10,10,10,0.95)",
+                  boxShadow: "0 16px 64px rgba(0,0,0,0.5)",
+                }}
+              >
+                {sorted.map((win, i) => (
+                  <div
+                    key={win.id}
+                    className={`flex flex-col items-center gap-2 px-4 py-3 rounded-xl transition-all ${i === switcherIndex ? "scale-105" : "opacity-50"}`}
+                    style={{
+                      background: i === switcherIndex ? `rgba(${theme.primaryRgb},0.15)` : "transparent",
+                      border: i === switcherIndex ? `1px solid rgba(${theme.primaryRgb},0.4)` : "1px solid transparent",
+                      boxShadow: i === switcherIndex ? `0 0 20px rgba(${theme.primaryRgb},0.15)` : "none",
+                    }}
+                  >
+                    <div
+                      className="w-14 h-14 flex items-center justify-center text-2xl rounded-lg"
+                      style={{
+                        background: theme.glassy ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.05)",
+                        border: `1px solid ${theme.glassy ? "rgba(255,255,255,0.1)" : "#1a1a1a"}`,
+                      }}
+                    >
+                      {APPS[win.app].icon}
+                    </div>
+                    <span className="text-[10px] tracking-wider max-w-[80px] truncate" style={{ color: i === switcherIndex ? theme.primary : "#666" }}>
+                      {APPS[win.app].label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Mini player — shown when Music window is minimized */}
         {minimizedMusicWin && miniMusicState && (
           <MiniPlayer
@@ -837,24 +1128,45 @@ export default function SysPage() {
 // ─── Window Component ────────────────────────────────────────────────────────
 
 type ResizeEdge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
-type SnapZone = "top" | "left" | "right" | null;
+type SnapZone = "top" | "left" | "right" | "top-left" | "top-right" | "bottom-left" | "bottom-right" | null;
 
 const SNAP_THRESHOLD = 8;
-const TASKBAR_H = 40;
+const TASKBAR_H = 52;
+const SNAP_GAP = 8;
 
 const getSnapZone = (e: MouseEvent): SnapZone => {
-  if (e.clientY <= SNAP_THRESHOLD) return "top";
-  if (e.clientX <= SNAP_THRESHOLD) return "left";
-  if (e.clientX >= window.innerWidth - SNAP_THRESHOLD) return "right";
+  const atTop = e.clientY <= SNAP_THRESHOLD;
+  const atBottom = e.clientY >= window.innerHeight - TASKBAR_H - SNAP_THRESHOLD;
+  const atLeft = e.clientX <= SNAP_THRESHOLD;
+  const atRight = e.clientX >= window.innerWidth - SNAP_THRESHOLD;
+
+  if (atTop && atLeft) return "top-left";
+  if (atTop && atRight) return "top-right";
+  if (atBottom && atLeft) return "bottom-left";
+  if (atBottom && atRight) return "bottom-right";
+  if (atTop) return "top";
+  if (atLeft) return "left";
+  if (atRight) return "right";
   return null;
 };
 
 const getSnapRect = (zone: SnapZone) => {
-  const h = window.innerHeight - TASKBAR_H;
-  if (zone === "top") return { x: 0, y: 0, w: window.innerWidth, h };
-  if (zone === "left") return { x: 0, y: 0, w: Math.floor(window.innerWidth / 2), h };
-  if (zone === "right") return { x: Math.floor(window.innerWidth / 2), y: 0, w: Math.floor(window.innerWidth / 2), h };
-  return null;
+  const g = SNAP_GAP;
+  const fullH = window.innerHeight - TASKBAR_H - g * 2;
+  const halfH = Math.floor(fullH / 2) - g / 2;
+  const fullW = window.innerWidth;
+  const halfW = Math.floor(fullW / 2) - g - g / 2;
+
+  switch (zone) {
+    case "top": return { x: g, y: g, w: fullW - g * 2, h: fullH };
+    case "left": return { x: g, y: g, w: halfW, h: fullH };
+    case "right": return { x: Math.floor(fullW / 2) + g / 2, y: g, w: halfW, h: fullH };
+    case "top-left": return { x: g, y: g, w: halfW, h: halfH };
+    case "top-right": return { x: Math.floor(fullW / 2) + g / 2, y: g, w: halfW, h: halfH };
+    case "bottom-left": return { x: g, y: g + halfH + g, w: halfW, h: halfH };
+    case "bottom-right": return { x: Math.floor(fullW / 2) + g / 2, y: g + halfH + g, w: halfW, h: halfH };
+    default: return null;
+  }
 };
 
 function Window({
@@ -866,6 +1178,9 @@ function Window({
   onMove,
   onResize,
   onSnap,
+  alarms,
+  setAlarms,
+  alarmIdRef,
 }: {
   win: WindowState;
   onClose: () => void;
@@ -875,6 +1190,9 @@ function Window({
   onMove: (x: number, y: number) => void;
   onResize: (w: number, h: number, x?: number, y?: number) => void;
   onSnap: (snap: { x: number; y: number; w: number; h: number }) => void;
+  alarms: { time: string; enabled: boolean; id: number }[];
+  setAlarms: (update: React.SetStateAction<{ time: string; enabled: boolean; id: number }[]>) => void;
+  alarmIdRef: React.MutableRefObject<number>;
 }) {
   const { theme } = useContext(ThemeContext);
   const windowRef = useRef<HTMLDivElement>(null);
@@ -1027,7 +1345,7 @@ function Window({
         height: snapRect ? snapRect.h - 8 : hiddenStyle.height,
         border: `2px solid rgba(${theme.primaryRgb},0.4)`,
         backgroundColor: `rgba(${theme.primaryRgb},0.06)`,
-        borderRadius: 4,
+        borderRadius: theme.glassy ? 16 : 4,
         opacity: snapRect ? 1 : 0,
         transition: "all 0.2s ease",
       }}
@@ -1059,30 +1377,33 @@ function Window({
       onMouseDown={onFocus}
     >
       <div
-        className={`flex flex-col h-full overflow-hidden ${theme.glassy ? "backdrop-blur-2xl border border-white/10" : "border border-[#1a1a1a] bg-[#0a0a0a]"}`}
+        className={`flex flex-col h-full overflow-hidden ${theme.glassy ? `${win.preMaximized || win.w * win.h > 400000 ? "" : "backdrop-blur-xl"} rounded-xl border border-white/15` : "border border-[#1a1a1a] bg-[#0a0a0a]"}`}
         style={{
           boxShadow: theme.glassy
-            ? `0 8px 32px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.06)`
+            ? (win.preMaximized || win.w * win.h > 400000) ? "none" : `0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08), inset 0 1px 0 rgba(255,255,255,0.1)`
             : `0 8px 32px rgba(0,0,0,0.6), 0 0 1px rgba(${theme.primaryRgb},0.1)`,
-          ...(theme.glassy ? { background: "rgba(15,15,15,0.55)" } : {}),
+          ...(theme.glassy ? { background: (win.preMaximized || win.w * win.h > 400000) ? "rgba(15,15,25,0.92)" : "rgba(20,20,30,0.55)" } : {}),
         }}
       >
         {/* Title bar */}
         <div
-          className={`flex items-center gap-2 px-3 py-2 border-b shrink-0 cursor-grab active:cursor-grabbing ${theme.glassy ? "bg-white/5 border-white/8" : "bg-[#0f0f0f] border-[#1a1a1a]"}`}
+          className={`flex items-center gap-2 px-3 py-2 shrink-0 cursor-grab active:cursor-grabbing ${theme.glassy ? "border-none" : "border-b bg-[#0f0f0f] border-[#1a1a1a]"}`}
           onMouseDown={startDrag}
           onDoubleClick={onToggleMaximize}
         >
           <button
             onClick={onClose}
-            className="w-2.5 h-2.5 rounded-full bg-[#ff5f57] hover:brightness-125 transition cursor-pointer"
+            className={`w-2.5 h-2.5 rounded-full hover:brightness-125 transition cursor-pointer ${theme.glassy ? "bg-[#ff5f57]/80" : "bg-[#ff5f57]"}`}
           />
           <button
             onClick={onMinimize}
-            className="w-2.5 h-2.5 rounded-full bg-[#febc2e] hover:brightness-125 transition cursor-pointer"
+            className={`w-2.5 h-2.5 rounded-full hover:brightness-125 transition cursor-pointer ${theme.glassy ? "bg-[#febc2e]/80" : "bg-[#febc2e]"}`}
           />
-          <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
-          <span className="ml-2 text-[10px] text-[#555] tracking-wider">{win.title}</span>
+          <button
+            onClick={onToggleMaximize}
+            className={`w-2.5 h-2.5 rounded-full hover:brightness-125 transition cursor-pointer ${theme.glassy ? "bg-[#28c840]/80" : "bg-[#28c840]"}`}
+          />
+          <span className={`ml-2 text-[10px] tracking-wider ${theme.glassy ? "text-white/40" : "text-[#555]"}`}>{win.title}</span>
         </div>
 
         {/* Content */}
@@ -1092,8 +1413,9 @@ function Window({
           {win.app === "monitor" && <MonitorApp />}
           {win.app === "about" && <AboutApp />}
           {win.app === "notepad" && <NotepadApp />}
-          {win.app === "visitors" && <VisitorsApp />}
+          {win.app === "analytics" && <AnalyticsApp />}
           {win.app === "music" && <MusicApp />}
+          {win.app === "clock" && <ClockApp alarms={alarms} setAlarms={setAlarms} alarmIdRef={alarmIdRef} />}
         </div>
       </div>
 
@@ -1533,7 +1855,7 @@ function FilesApp() {
   return (
     <div className="h-full flex flex-col">
       {/* Path bar */}
-      <div className={`px-3 py-2 border-b border-[#1a1a1a] ${theme.glassy ? "bg-transparent" : "bg-[#080808]"} flex items-center gap-2 text-[10px] shrink-0`}>
+      <div className={`px-3 py-2 ${theme.glassy ? "border-b border-white/5" : "border-b border-[#1a1a1a] bg-[#080808]"} flex items-center gap-2 text-[10px] shrink-0`}>
         <button
           onClick={() => {
             setPath((p) => p.slice(0, -1));
@@ -1634,21 +1956,21 @@ function MonitorApp() {
       {/* CPU & Memory bars */}
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <div className="text-[10px] text-[#555] uppercase tracking-wider mb-1.5">CPU</div>
-          <div className={`h-4 overflow-hidden border border-[#1a1a1a] ${theme.glassy ? "bg-white/5" : "bg-[#111]"}`}>
+          <div className={`text-[10px] uppercase tracking-wider mb-1.5 ${theme.glassy ? "text-white/30" : "text-[#555]"}`}>CPU</div>
+          <div className={`h-4 overflow-hidden border ${theme.glassy ? "border-white/10 bg-white/5 rounded" : "border-[#1a1a1a] bg-[#111]"}`}>
             <div
-              className="h-full transition-all duration-700"
+              className={`h-full transition-all duration-700 ${theme.glassy ? "rounded" : ""}`}
               style={{
                 width: `${cpu}%`,
                 background: cpu > 80 ? "#ff5f57" : `linear-gradient(90deg, ${theme.primary}, ${theme.secondary})`,
               }}
             />
           </div>
-          <div className="text-[11px] text-[#888] mt-1">{cpu}%</div>
+          <div className={`text-[11px] mt-1 ${theme.glassy ? "text-white/50" : "text-[#888]"}`}>{cpu}%</div>
         </div>
         <div>
-          <div className="text-[10px] text-[#555] uppercase tracking-wider mb-1.5">Memory</div>
-          <div className={`h-4 overflow-hidden border border-[#1a1a1a] ${theme.glassy ? "bg-white/5" : "bg-[#111]"}`}>
+          <div className={`text-[10px] uppercase tracking-wider mb-1.5 ${theme.glassy ? "text-white/30" : "text-[#555]"}`}>Memory</div>
+          <div className={`h-4 overflow-hidden border ${theme.glassy ? "border-white/10 bg-white/5 rounded" : "border-[#1a1a1a] bg-[#111]"}`}>
             <div
               className="h-full transition-all duration-700"
               style={{
@@ -1663,8 +1985,8 @@ function MonitorApp() {
 
       {/* CPU Graph */}
       <div>
-        <div className="text-[10px] text-[#555] uppercase tracking-wider mb-1.5">CPU History</div>
-        <div className={`h-20 border border-[#1a1a1a] flex items-end gap-px p-1 ${theme.glassy ? "bg-white/5" : "bg-[#080808]"}`}>
+        <div className={`text-[10px] uppercase tracking-wider mb-1.5 ${theme.glassy ? "text-white/30" : "text-[#555]"}`}>CPU History</div>
+        <div className={`h-20 border flex items-end gap-px p-1 ${theme.glassy ? "border-white/10 bg-white/5 rounded-lg" : "border-[#1a1a1a] bg-[#080808]"}`}>
           {cpuHistory.map((val, i) => (
             <div
               key={i}
@@ -1688,7 +2010,7 @@ function MonitorApp() {
       <div>
         <div className="text-[10px] text-[#555] uppercase tracking-wider mb-1.5">Processes</div>
         <div className="border border-[#1a1a1a]">
-          <div className={`grid grid-cols-3 gap-2 px-3 py-1.5 text-[9px] text-[#555] uppercase tracking-wider border-b border-[#1a1a1a] ${theme.glassy ? "bg-transparent" : "bg-[#0f0f0f]"}`}>
+          <div className={`grid grid-cols-3 gap-2 px-3 py-1.5 text-[9px] uppercase tracking-wider ${theme.glassy ? "text-white/30 border-b border-white/5" : "text-[#555] border-b border-[#1a1a1a] bg-[#0f0f0f]"}`}>
             <span>Name</span>
             <span>CPU %</span>
             <span>Mem (MB)</span>
@@ -1771,7 +2093,7 @@ function NotepadApp() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className={`px-3 py-1.5 border-b border-[#1a1a1a] ${theme.glassy ? "bg-transparent" : "bg-[#080808]"} text-[10px] text-[#555] shrink-0`}>
+      <div className={`px-3 py-1.5 ${theme.glassy ? "border-b border-white/5" : "border-b border-[#1a1a1a] bg-[#080808]"} text-[10px] text-[#555] shrink-0`}>
         untitled.md — {text.split("\n").length} lines
       </div>
       <textarea
@@ -1790,7 +2112,63 @@ function NotepadApp() {
   );
 }
 
-// ─── Visitors App ───────────────────────────────────────────────────────────
+// ─── Analytics App ──────────────────────────────────────────────────────────
+
+type AnalyticsTab = "visitors" | "web-analytics" | "speed";
+
+function AnalyticsApp() {
+  const { theme } = useContext(ThemeContext);
+  const [tab, setTab] = useState<AnalyticsTab>("visitors");
+
+  const tabs: { id: AnalyticsTab; label: string }[] = [
+    { id: "visitors", label: "Visitors" },
+    { id: "web-analytics", label: "Web Analytics" },
+    { id: "speed", label: "Speed Insights" },
+  ];
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Tab bar */}
+      <div className={`flex shrink-0 ${theme.glassy ? "border-b border-white/5" : "border-b border-[#1a1a1a] bg-[#080808]"}`}>
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className="px-4 py-2 text-[10px] uppercase tracking-wider transition cursor-pointer"
+            style={{
+              color: tab === t.id ? theme.primary : "#555",
+              borderBottom: tab === t.id ? `1.5px solid ${theme.primary}` : "1.5px solid transparent",
+              background: tab === t.id ? `rgba(${theme.primaryRgb},0.05)` : "transparent",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 overflow-hidden">
+        {tab === "visitors" && <VisitorsPanel />}
+        {tab === "web-analytics" && <VercelPlaceholderPanel theme={theme} title="Web Analytics" description="Connect Vercel API to view page views, unique visitors, top pages, referrers, and geographic data." />}
+        {tab === "speed" && <VercelPlaceholderPanel theme={theme} title="Speed Insights" description="Connect Vercel API to view Core Web Vitals: FCP, LCP, CLS, FID, and TTFB metrics." />}
+      </div>
+    </div>
+  );
+}
+
+function VercelPlaceholderPanel({ theme, title, description }: { theme: OSTheme; title: string; description: string }) {
+  return (
+    <div className="h-full flex items-center justify-center p-8">
+      <div className="text-center max-w-[320px] space-y-3">
+        <div className="text-[13px] font-medium" style={{ color: theme.primary }}>{title}</div>
+        <div className="text-[11px] text-[#666] leading-relaxed">{description}</div>
+        <div className="text-[10px] px-3 py-2 border rounded" style={{ borderColor: `rgba(${theme.primaryRgb},0.2)`, color: theme.secondary }}>
+          Requires VERCEL_TOKEN and VERCEL_PROJECT_ID in .env.local
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Visitors Panel ─────────────────────────────────────────────────────────
 
 interface VisitorEntry {
   id: string;
@@ -1816,7 +2194,7 @@ interface VisitorEntry {
   timezone: string;
 }
 
-function VisitorsApp() {
+function VisitorsPanel() {
   const { theme } = useContext(ThemeContext);
   const [visits, setVisits] = useState<VisitorEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1872,7 +2250,7 @@ function VisitorsApp() {
   return (
     <div className="h-full flex flex-col">
       {/* Stats bar */}
-      <div className={`px-3 py-2 border-b border-[#1a1a1a] ${theme.glassy ? "bg-transparent" : "bg-[#080808]"} flex items-center gap-4 shrink-0`}>
+      <div className={`px-3 py-2 ${theme.glassy ? "border-b border-white/5" : "border-b border-[#1a1a1a] bg-[#080808]"} flex items-center gap-4 shrink-0`}>
         <div className="flex items-center gap-1.5">
           <div className="w-1.5 h-1.5 rounded-full" style={{ background: theme.primary, boxShadow: `0 0 6px ${theme.primary}` }} />
           <span className="text-[10px] text-[#555] uppercase tracking-wider">Total</span>
@@ -1890,7 +2268,7 @@ function VisitorsApp() {
           placeholder="Filter..."
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          className={`border border-[#1a1a1a] text-[10px] text-[#ccc] px-2 py-1 w-32 outline-none ${theme.glassy ? "bg-white/5" : "bg-[#111]"}`}
+          className={`border text-[10px] text-[#ccc] px-2 py-1 w-32 outline-none ${theme.glassy ? "bg-white/5 border-white/10 rounded" : "bg-[#111] border-[#1a1a1a]"}`}
           style={{ caretColor: theme.primary }}
         />
       </div>
@@ -2059,12 +2437,12 @@ function Taskbar({
 
   return (
     <div
-      className={`fixed bottom-0 left-0 right-0 h-10 flex items-center px-2 gap-1 z-[9998] ${theme.glassy ? "backdrop-blur-2xl border-t border-white/10" : "bg-[#0a0a0a]/95 backdrop-blur-sm border-t border-[#1a1a1a]"}`}
-      style={theme.glassy ? { background: "rgba(15,15,15,0.45)" } : undefined}
+      className={`fixed bottom-0 left-0 right-0 flex items-center px-2 gap-1 z-[9998] ${theme.glassy ? "h-11 mx-2 mb-1.5 rounded-2xl backdrop-blur-2xl border border-white/10" : "h-10 bg-[#0a0a0a]/95 backdrop-blur-sm border-t border-[#1a1a1a]"}`}
+      style={theme.glassy ? { background: "rgba(20,20,30,0.4)", boxShadow: "0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08)" } : undefined}
     >
       {/* Start button */}
       <button
-        className="h-7 px-2.5 flex items-center gap-1.5 hover:bg-white/5 transition rounded cursor-pointer"
+        className={`h-7 px-2.5 flex items-center gap-1.5 transition cursor-pointer ${theme.glassy ? "hover:bg-white/10 rounded-lg" : "hover:bg-white/5 rounded"}`}
         onClick={() => onOpen("terminal")}
       >
         <svg width="16" height="11" viewBox="0 0 120 80" fill="none">
@@ -2074,7 +2452,7 @@ function Taskbar({
         </svg>
       </button>
 
-      <div className="w-px h-5 bg-[#1a1a1a] mx-1" />
+      <div className={`w-px h-5 mx-1 ${theme.glassy ? "bg-white/10" : "bg-[#1a1a1a]"}`} />
 
       {/* Window list */}
       <div className="flex-1 flex items-center gap-1 overflow-x-auto">
@@ -2083,8 +2461,10 @@ function Taskbar({
             key={win.id}
             data-taskbar-id={win.id}
             onClick={() => onFocus(win.id)}
-            className={`h-7 px-3 text-[10px] tracking-wider flex items-center gap-1.5 rounded transition cursor-pointer ${
-              win.minimized ? "text-[#444] hover:bg-white/5" : "text-[#888] bg-white/5"
+            className={`h-7 px-3 text-[10px] tracking-wider flex items-center gap-1.5 transition cursor-pointer ${
+              theme.glassy
+                ? `rounded-lg ${win.minimized ? "text-white/30 hover:bg-white/8" : "text-white/70 bg-white/10"}`
+                : `rounded ${win.minimized ? "text-[#444] hover:bg-white/5" : "text-[#888] bg-white/5"}`
             }`}
           >
             <span>{APPS[win.app].icon}</span>
@@ -2096,7 +2476,7 @@ function Taskbar({
       {/* System tray */}
       <div className="flex items-center gap-3 px-2">
         <div className="w-1.5 h-1.5 rounded-full bg-[#28c840]" style={{ boxShadow: "0 0 6px #28c840" }} />
-        <span className="text-[10px] text-[#555] tabular-nums">{time}</span>
+        <span className={`text-[10px] tabular-nums ${theme.glassy ? "text-white/40" : "text-[#555]"}`}>{time}</span>
       </div>
     </div>
   );
@@ -2106,7 +2486,7 @@ function Taskbar({
 
 const MINI_PLAYER_W = 300;
 const MINI_PLAYER_GRID = 192;
-const MINI_PLAYER_TASKBAR_H = 40;
+const MINI_PLAYER_TASKBAR_H = TASKBAR_H;
 
 function MiniPlayer({
   isPlaying,
@@ -2132,8 +2512,8 @@ function MiniPlayer({
 
   // Snap to grid points + screen edges, pick nearest
   const snapToGrid = (v: number, max: number) => {
-    const points = [0];
-    for (let p = MINI_PLAYER_GRID; p < max; p += MINI_PLAYER_GRID) points.push(p);
+    const points = [DESKTOP_PAD];
+    for (let p = DESKTOP_PAD + MINI_PLAYER_GRID; p < max; p += MINI_PLAYER_GRID) points.push(p);
     points.push(max);
     let best = points[0], bestDist = Math.abs(v - best);
     for (const p of points) {
@@ -2151,10 +2531,10 @@ function MiniPlayer({
   const wasDragRef = useRef(false);
   const widgetRef = useRef<HTMLDivElement>(null);
 
-  // Default position: bottom-right above taskbar
+  // Default position: bottom-right above taskbar with padding
   const resolvedPos = pos ?? {
-    x: (typeof window !== "undefined" ? window.innerWidth : 1920) - MINI_PLAYER_W,
-    y: (typeof window !== "undefined" ? window.innerHeight : 1080) - MINI_PLAYER_TASKBAR_H - (widgetRef.current?.offsetHeight ?? 140),
+    x: (typeof window !== "undefined" ? window.innerWidth : 1920) - MINI_PLAYER_W - DESKTOP_PAD,
+    y: (typeof window !== "undefined" ? window.innerHeight : 1080) - MINI_PLAYER_TASKBAR_H - (widgetRef.current?.offsetHeight ?? 140) - DESKTOP_PAD,
   };
 
   useEffect(() => {
@@ -2170,11 +2550,11 @@ function MiniPlayer({
       const rawX = d.origX + dx;
       const rawY = d.origY + dy;
       const widgetH = widgetRef.current?.offsetHeight ?? 140;
-      const maxX = window.innerWidth - MINI_PLAYER_W;
-      const maxY = window.innerHeight - MINI_PLAYER_TASKBAR_H - widgetH;
+      const maxX = window.innerWidth - MINI_PLAYER_W - DESKTOP_PAD;
+      const maxY = window.innerHeight - MINI_PLAYER_TASKBAR_H - widgetH - DESKTOP_PAD;
       setPos({
-        x: Math.max(0, Math.min(rawX, maxX)),
-        y: Math.max(0, Math.min(rawY, maxY)),
+        x: Math.max(DESKTOP_PAD, Math.min(rawX, maxX)),
+        y: Math.max(DESKTOP_PAD, Math.min(rawY, maxY)),
       });
     };
     const onMouseUp = () => {
@@ -2190,8 +2570,8 @@ function MiniPlayer({
         setPos((prev) => {
           if (!prev) return prev;
           const widgetH = widgetRef.current?.offsetHeight ?? 140;
-          const maxX = window.innerWidth - MINI_PLAYER_W;
-          const maxY = window.innerHeight - MINI_PLAYER_TASKBAR_H - widgetH;
+          const maxX = window.innerWidth - MINI_PLAYER_W - DESKTOP_PAD;
+          const maxY = window.innerHeight - MINI_PLAYER_TASKBAR_H - widgetH - DESKTOP_PAD;
           return {
             x: snapToGrid(prev.x, maxX),
             y: snapToGrid(prev.y, maxY),
@@ -2337,6 +2717,336 @@ interface YTPlaylistItem {
   };
   contentDetails: { itemCount: number };
 }
+
+// ─── Clock App ───────────────────────────────────────────────────────────────
+
+type ClockTab = "clock" | "stopwatch" | "timer" | "alarms";
+
+function ClockApp({ alarms, setAlarms, alarmIdRef }: {
+  alarms: { time: string; enabled: boolean; id: number }[];
+  setAlarms: (update: React.SetStateAction<{ time: string; enabled: boolean; id: number }[]>) => void;
+  alarmIdRef: React.MutableRefObject<number>;
+}) {
+  const { theme } = useContext(ThemeContext);
+  const [tab, setTab] = useState<ClockTab>("clock");
+  const [now, setNow] = useState(new Date());
+
+  // Stopwatch
+  const [swRunning, setSwRunning] = useState(false);
+  const [swElapsed, setSwElapsed] = useState(0);
+  const [swLaps, setSwLaps] = useState<number[]>([]);
+  const swStart = useRef<number>(0);
+  const swRaf = useRef<number>(0);
+
+  // Timer
+  const [tmTotal, setTmTotal] = useState(300);
+  const [tmLeft, setTmLeft] = useState(300);
+  const [tmRunning, setTmRunning] = useState(false);
+  const [tmDone, setTmDone] = useState(false);
+  const [tmInput, setTmInput] = useState("5:00");
+
+  const [alarmInput, setAlarmInput] = useState("08:00");
+
+  // Clock tick
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Stopwatch rAF
+  useEffect(() => {
+    if (!swRunning) return;
+    swStart.current = performance.now() - swElapsed;
+    const tick = () => {
+      setSwElapsed(performance.now() - swStart.current);
+      swRaf.current = requestAnimationFrame(tick);
+    };
+    swRaf.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(swRaf.current);
+  }, [swRunning]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Timer countdown
+  useEffect(() => {
+    if (!tmRunning) return;
+    const id = setInterval(() => {
+      setTmLeft((prev) => {
+        if (prev <= 1) {
+          setTmRunning(false);
+          setTmDone(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [tmRunning]);
+
+  const fmtMs = (ms: number) => {
+    const totalSec = Math.floor(ms / 1000);
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    const cs = Math.floor((ms % 1000) / 10);
+    return `${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
+  };
+
+  const fmtSec = (s: number) => {
+    const min = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  };
+
+  const parseTimerInput = (v: string) => {
+    const parts = v.split(":").map(Number);
+    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) return parts[0] * 60 + parts[1];
+    if (parts.length === 1 && !isNaN(parts[0])) return parts[0] * 60;
+    return 300;
+  };
+
+  const tabs: { id: ClockTab; label: string }[] = [
+    { id: "clock", label: "Clock" },
+    { id: "stopwatch", label: "Stopwatch" },
+    { id: "timer", label: "Timer" },
+    { id: "alarms", label: "Alarms" },
+  ];
+
+  return (
+    <div className="h-full flex flex-col relative">
+      {/* Tab bar */}
+      <div className={`flex shrink-0 ${theme.glassy ? "border-b border-white/5" : "border-b border-[#1a1a1a] bg-[#080808]"}`}>
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className="flex-1 py-2 text-[10px] uppercase tracking-wider transition cursor-pointer"
+            style={{
+              color: tab === t.id ? theme.primary : "#555",
+              borderBottom: tab === t.id ? `2px solid ${theme.primary}` : "2px solid transparent",
+              background: tab === t.id ? (theme.glassy ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.02)") : "transparent",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 flex flex-col items-center justify-center p-4 overflow-auto">
+        {/* Clock */}
+        {tab === "clock" && (
+          <div className="flex flex-col items-center gap-4">
+            <div className="text-5xl font-light tabular-nums tracking-wider" style={{ color: theme.primary }}>
+              {now.toLocaleTimeString("en-GB")}
+            </div>
+            <div className="text-sm" style={{ color: "#666" }}>
+              {now.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+            </div>
+            {/* Analog clock face */}
+            <svg width="140" height="140" viewBox="0 0 140 140" className="mt-2">
+              <circle cx="70" cy="70" r="65" fill="none" stroke={theme.glassy ? "rgba(255,255,255,0.1)" : "#1a1a1a"} strokeWidth="2" />
+              {[...Array(12)].map((_, i) => {
+                const a = (i * 30 - 90) * (Math.PI / 180);
+                return <line key={i} x1={70 + 55 * Math.cos(a)} y1={70 + 55 * Math.sin(a)} x2={70 + 60 * Math.cos(a)} y2={70 + 60 * Math.sin(a)} stroke="#555" strokeWidth="2" />;
+              })}
+              {/* Hour hand */}
+              {(() => {
+                const ha = ((now.getHours() % 12) * 30 + now.getMinutes() * 0.5 - 90) * (Math.PI / 180);
+                return <line x1="70" y1="70" x2={70 + 32 * Math.cos(ha)} y2={70 + 32 * Math.sin(ha)} stroke={theme.primary} strokeWidth="3" strokeLinecap="round" />;
+              })()}
+              {/* Minute hand */}
+              {(() => {
+                const ma = (now.getMinutes() * 6 - 90) * (Math.PI / 180);
+                return <line x1="70" y1="70" x2={70 + 45 * Math.cos(ma)} y2={70 + 45 * Math.sin(ma)} stroke={theme.primary} strokeWidth="2" strokeLinecap="round" />;
+              })()}
+              {/* Second hand */}
+              {(() => {
+                const sa = (now.getSeconds() * 6 - 90) * (Math.PI / 180);
+                return <line x1="70" y1="70" x2={70 + 50 * Math.cos(sa)} y2={70 + 50 * Math.sin(sa)} stroke={theme.secondary} strokeWidth="1" strokeLinecap="round" />;
+              })()}
+              <circle cx="70" cy="70" r="3" fill={theme.primary} />
+            </svg>
+          </div>
+        )}
+
+        {/* Stopwatch */}
+        {tab === "stopwatch" && (
+          <div className="flex flex-col items-center gap-4 w-full">
+            <div className="text-4xl font-light tabular-nums tracking-wider" style={{ color: theme.primary }}>
+              {fmtMs(swElapsed)}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setSwRunning(!swRunning)}
+                className="px-4 py-1.5 text-[11px] uppercase tracking-wider rounded transition cursor-pointer"
+                style={{ background: swRunning ? "rgba(255,95,87,0.2)" : `rgba(${theme.primaryRgb},0.15)`, color: swRunning ? "#ff5f57" : theme.primary, border: `1px solid ${swRunning ? "rgba(255,95,87,0.3)" : `rgba(${theme.primaryRgb},0.3)`}` }}
+              >
+                {swRunning ? "Stop" : swElapsed > 0 ? "Resume" : "Start"}
+              </button>
+              {swRunning && (
+                <button
+                  onClick={() => setSwLaps((prev) => [swElapsed, ...prev])}
+                  className="px-4 py-1.5 text-[11px] uppercase tracking-wider rounded transition cursor-pointer"
+                  style={{ background: "rgba(255,255,255,0.05)", color: "#888", border: "1px solid rgba(255,255,255,0.1)" }}
+                >
+                  Lap
+                </button>
+              )}
+              {!swRunning && swElapsed > 0 && (
+                <button
+                  onClick={() => { setSwElapsed(0); setSwLaps([]); }}
+                  className="px-4 py-1.5 text-[11px] uppercase tracking-wider rounded transition cursor-pointer"
+                  style={{ background: "rgba(255,255,255,0.05)", color: "#888", border: "1px solid rgba(255,255,255,0.1)" }}
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            {swLaps.length > 0 && (
+              <div className="w-full max-h-32 overflow-auto mt-2">
+                {swLaps.map((lap, i) => (
+                  <div key={i} className="flex justify-between px-4 py-1 text-[11px]" style={{ color: "#888", borderBottom: `1px solid ${theme.glassy ? "rgba(255,255,255,0.05)" : "#1a1a1a"}` }}>
+                    <span>Lap {swLaps.length - i}</span>
+                    <span className="tabular-nums" style={{ color: theme.primary }}>{fmtMs(i === 0 ? lap : lap - swLaps[i - 1])}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Timer */}
+        {tab === "timer" && (
+          <div className="flex flex-col items-center gap-4">
+            {tmDone ? (
+              <div className="flex flex-col items-center gap-3">
+                <div className="text-3xl animate-pulse" style={{ color: theme.secondary }}>Time&apos;s up!</div>
+                <button
+                  onClick={() => { setTmDone(false); setTmLeft(tmTotal); }}
+                  className="px-4 py-1.5 text-[11px] uppercase tracking-wider rounded transition cursor-pointer"
+                  style={{ background: `rgba(${theme.primaryRgb},0.15)`, color: theme.primary, border: `1px solid rgba(${theme.primaryRgb},0.3)` }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="text-4xl font-light tabular-nums tracking-wider" style={{ color: tmLeft < 10 ? "#ff5f57" : theme.primary }}>
+                  {fmtSec(tmLeft)}
+                </div>
+                {/* Progress ring */}
+                <svg width="100" height="100" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="44" fill="none" stroke={theme.glassy ? "rgba(255,255,255,0.08)" : "#1a1a1a"} strokeWidth="4" />
+                  <circle
+                    cx="50" cy="50" r="44" fill="none" stroke={theme.primary} strokeWidth="4" strokeLinecap="round"
+                    strokeDasharray={2 * Math.PI * 44}
+                    strokeDashoffset={2 * Math.PI * 44 * (1 - (tmTotal > 0 ? tmLeft / tmTotal : 0))}
+                    transform="rotate(-90 50 50)"
+                    style={{ transition: "stroke-dashoffset 1s linear" }}
+                  />
+                </svg>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setTmRunning(!tmRunning)}
+                    className="px-4 py-1.5 text-[11px] uppercase tracking-wider rounded transition cursor-pointer"
+                    style={{ background: tmRunning ? "rgba(255,95,87,0.2)" : `rgba(${theme.primaryRgb},0.15)`, color: tmRunning ? "#ff5f57" : theme.primary, border: `1px solid ${tmRunning ? "rgba(255,95,87,0.3)" : `rgba(${theme.primaryRgb},0.3)`}` }}
+                  >
+                    {tmRunning ? "Pause" : tmLeft < tmTotal ? "Resume" : "Start"}
+                  </button>
+                  <button
+                    onClick={() => { setTmRunning(false); setTmLeft(tmTotal); }}
+                    className="px-4 py-1.5 text-[11px] uppercase tracking-wider rounded transition cursor-pointer"
+                    style={{ background: "rgba(255,255,255,0.05)", color: "#888", border: "1px solid rgba(255,255,255,0.1)" }}
+                  >
+                    Reset
+                  </button>
+                </div>
+                {!tmRunning && tmLeft === tmTotal && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <input
+                      value={tmInput}
+                      onChange={(e) => setTmInput(e.target.value)}
+                      onBlur={() => { const s = parseTimerInput(tmInput); setTmTotal(s); setTmLeft(s); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { const s = parseTimerInput(tmInput); setTmTotal(s); setTmLeft(s); } }}
+                      className={`w-20 text-center text-[12px] px-2 py-1 outline-none rounded ${theme.glassy ? "bg-white/5 border border-white/10" : "bg-[#111] border border-[#1a1a1a]"}`}
+                      style={{ color: theme.primary, caretColor: theme.primary }}
+                      placeholder="M:SS"
+                    />
+                    <span className="text-[10px]" style={{ color: "#555" }}>min:sec</span>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Alarms */}
+        {tab === "alarms" && (
+          <div className="flex flex-col gap-3 w-full">
+            <div className="flex gap-2">
+              <input
+                value={alarmInput}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^0-9:]/g, "");
+                  if (v.length <= 5) setAlarmInput(v);
+                }}
+                onBlur={() => {
+                  const m = alarmInput.match(/^(\d{1,2}):(\d{2})$/);
+                  if (!m || +m[1] > 23 || +m[2] > 59) setAlarmInput("08:00");
+                  else setAlarmInput(`${m[1].padStart(2, "0")}:${m[2]}`);
+                }}
+                placeholder="HH:MM"
+                maxLength={5}
+                className={`w-24 text-center text-[12px] px-3 py-1.5 outline-none rounded ${theme.glassy ? "bg-white/5 border border-white/10" : "bg-[#111] border border-[#1a1a1a]"}`}
+                style={{ color: theme.primary, caretColor: theme.primary }}
+              />
+              <button
+                onClick={() => {
+                  setAlarms((prev) => [...prev, { time: alarmInput, enabled: true, id: ++alarmIdRef.current }]);
+                }}
+                className="px-3 py-1.5 text-[11px] uppercase tracking-wider rounded transition cursor-pointer"
+                style={{ background: `rgba(${theme.primaryRgb},0.15)`, color: theme.primary, border: `1px solid rgba(${theme.primaryRgb},0.3)` }}
+              >
+                Add
+              </button>
+            </div>
+            {alarms.length === 0 && (
+              <div className="text-[11px] text-center py-6" style={{ color: "#555" }}>No alarms set</div>
+            )}
+            {alarms.map((a) => (
+              <div
+                key={a.id}
+                className="flex items-center justify-between px-3 py-2 rounded"
+                style={{ background: theme.glassy ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.02)", border: `1px solid ${theme.glassy ? "rgba(255,255,255,0.06)" : "#1a1a1a"}` }}
+              >
+                <span className="text-lg tabular-nums" style={{ color: a.enabled ? theme.primary : "#555" }}>{a.time}</span>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setAlarms((prev) => prev.map((x) => x.id === a.id ? { ...x, enabled: !x.enabled } : x))}
+                    className="w-8 h-4 rounded-full transition cursor-pointer relative"
+                    style={{ background: a.enabled ? `rgba(${theme.primaryRgb},0.3)` : "rgba(255,255,255,0.1)" }}
+                  >
+                    <div
+                      className="absolute top-0.5 w-3 h-3 rounded-full transition-all"
+                      style={{ background: a.enabled ? theme.primary : "#555", left: a.enabled ? 16 : 2 }}
+                    />
+                  </button>
+                  <button
+                    onClick={() => setAlarms((prev) => prev.filter((x) => x.id !== a.id))}
+                    className="text-[10px] cursor-pointer transition hover:opacity-80"
+                    style={{ color: "#ff5f57" }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Music App ────────────────────────────────────────────────────────────────
 
 function MusicApp() {
   const { theme } = useContext(ThemeContext);
@@ -2652,7 +3362,7 @@ function MusicApp() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header bar */}
-      <div className={`px-3 py-2 border-b border-[#1a1a1a] ${theme.glassy ? "bg-transparent" : "bg-[#080808]"} flex items-center gap-2 shrink-0`}>
+      <div className={`px-3 py-2 ${theme.glassy ? "border-b border-white/5" : "border-b border-[#1a1a1a] bg-[#080808]"} flex items-center gap-2 shrink-0`}>
         <span className="text-[10px] uppercase tracking-wider" style={{ color: theme.primary }}>♫ YouTube Music</span>
         {selectedPlaylistId && (
           <>
@@ -2688,10 +3398,13 @@ function MusicApp() {
           ) : (
             <div className="space-y-1">
               {playlists.map((pl) => (
-                <button
+                <div
                   key={pl.id}
+                  role="button"
+                  tabIndex={0}
                   className="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/5 transition text-left cursor-pointer border border-transparent hover:border-[#1a1a1a]"
                   onClick={() => loadPlaylist(pl.id, pl.snippet.title)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") loadPlaylist(pl.id, pl.snippet.title); }}
                 >
                   {pl.snippet.thumbnails?.medium?.url ? (
                     <img src={pl.snippet.thumbnails.medium.url} alt="" className="w-10 h-7 object-cover shrink-0 opacity-80" />
@@ -2728,7 +3441,7 @@ function MusicApp() {
                     </button>
                     <span style={{ color: theme.primary }} className="text-[10px]">▶</span>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           )}
