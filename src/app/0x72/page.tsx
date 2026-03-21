@@ -20,6 +20,7 @@ interface OSTheme {
   primaryRgb: string;
   secondaryRgb: string;
   wallpaper?: string; // preset name, only if theme explicitly sets one
+  glassy?: boolean;
 }
 
 // ─── Themes ─────────────────────────────────────────────────────────────────
@@ -31,7 +32,7 @@ function hexToRgb(hex: string): string {
   return `${r},${g},${b}`;
 }
 
-const BUILTIN_THEME_IDS = ["cyber", "crimson", "violet", "matrix", "arctic", "amber"] as const;
+const BUILTIN_THEME_IDS = ["cyber", "crimson", "violet", "matrix", "arctic", "amber", "glass"] as const;
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
 const WALLPAPER_PRESETS: Record<string, { label: string; generate: (rgb: string) => WallpaperConfig }> = {
@@ -87,6 +88,7 @@ const THEMES: Record<string, OSTheme> = {
   matrix:  { name: "Matrix",  primary: "#00ff41", secondary: "#adff2f", primaryRgb: "0,255,65",    secondaryRgb: "173,255,47" },
   arctic:  { name: "Arctic",  primary: "#66ccff", secondary: "#a0d4ff", primaryRgb: "102,204,255", secondaryRgb: "160,212,255" },
   amber:   { name: "Amber",   primary: "#f0a500", secondary: "#ff6b35", primaryRgb: "240,165,0",   secondaryRgb: "255,107,53" },
+  glass:   { name: "Glass",   primary: "#88ccff", secondary: "#ccddff", primaryRgb: "136,204,255", secondaryRgb: "204,221,255", wallpaper: "none", glassy: true },
 };
 
 const ThemeContext = createContext<{
@@ -127,6 +129,22 @@ interface WindowState {
   minimizing?: boolean;
   restoring?: boolean;
 }
+
+// ─── Music player shared types & sync context ────────────────────────────────
+
+interface MusicTrack {
+  id: string;
+  title: string;
+  channel: string;
+  thumbnail: string;
+}
+
+// MusicApp populates this context so SysPage can render the mini-player
+// without lifting all player state out of MusicApp.
+const MusicSyncContext = createContext<{
+  reportState: (s: { isPlaying: boolean; currentTrack: MusicTrack | null; progress: number; duration: number }) => void;
+  registerControls: (c: { togglePlay: () => void; next: () => void; prev: () => void }) => void;
+}>({ reportState: () => {}, registerControls: () => {} });
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -235,8 +253,26 @@ export default function SysPage() {
   const [bootLines, setBootLines] = useState<string[]>([]);
   const desktopRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<{ startX: number; startY: number } | null>(null);
+
+  // Mini-player state — populated by MusicApp via MusicSyncContext
+  const [miniMusicState, setMiniMusicState] = useState<{ isPlaying: boolean; currentTrack: MusicTrack | null; progress: number; duration: number } | null>(null);
+  const musicControlsRef = useRef<{ togglePlay: () => void; next: () => void; prev: () => void } | null>(null);
+  const musicSync = useRef({
+    reportState: (s: { isPlaying: boolean; currentTrack: MusicTrack | null; progress: number; duration: number }) => setMiniMusicState(s),
+    registerControls: (c: { togglePlay: () => void; next: () => void; prev: () => void }) => { musicControlsRef.current = c; },
+  });
   const [selection, setSelection] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [selectedIcons, setSelectedIcons] = useState<Set<AppId>>(new Set());
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const [ctxSub, setCtxSub] = useState<string | null>(null);
+  const ctxSubTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [customWallpaperUrl, setCustomWallpaperUrlRaw] = useState<string | null>(null);
+  const setCustomWallpaperUrl = useCallback((url: string | null) => {
+    setCustomWallpaperUrlRaw(url);
+    if (url) localStorage.setItem("jcos_custom_wallpaper", url);
+    else localStorage.removeItem("jcos_custom_wallpaper");
+  }, []);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [themeId, setThemeIdRaw] = useState<ThemeId>("cyber");
   const [customThemes, setCustomThemes] = useState<Record<string, OSTheme>>({});
   const [wallpaperPreset, setWallpaperPresetRaw] = useState("grid");
@@ -298,6 +334,8 @@ export default function SysPage() {
   useEffect(() => {
     if (!authed) return;
     reloadThemes().catch(() => {});
+    const saved = localStorage.getItem("jcos_custom_wallpaper");
+    if (saved) setCustomWallpaperUrlRaw(saved);
   }, [authed, reloadThemes]);
 
   // Verify JWT on load
@@ -431,11 +469,33 @@ export default function SysPage() {
 
   // Desktop selection rectangle
   const handleDesktopMouseDown = (e: React.MouseEvent) => {
+    if (ctxMenu) { setCtxMenu(null); setCtxSub(null); return; }
     // Only start selection if clicking directly on the desktop background
     if (e.target !== desktopRef.current) return;
     selectionRef.current = { startX: e.clientX, startY: e.clientY };
     setSelection(null);
     setSelectedIcons(new Set());
+  };
+
+  const handleDesktopContextMenu = (e: React.MouseEvent) => {
+    if (e.target !== desktopRef.current) return;
+    e.preventDefault();
+    setCtxSub(null);
+    setCtxMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleWallpaperUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setCustomWallpaperUrl(dataUrl);
+    };
+    reader.readAsDataURL(file);
+    setCtxMenu(null);
+    setCtxSub(null);
+    e.target.value = "";
   };
 
   // Check which icons overlap with the selection rectangle
@@ -528,15 +588,20 @@ export default function SysPage() {
     );
   }
 
+  const minimizedMusicWin = windows.find((w) => w.app === "music" && w.minimized);
+
   return (
+    <MusicSyncContext.Provider value={musicSync.current}>
     <ThemeContext.Provider value={{ theme, themeId, setThemeId, allThemes, customThemeIds, reloadThemes, wallpaper, wallpaperPreset, setWallpaper }}>
       <div
         className="fixed inset-0 overflow-hidden select-none"
         style={{
           background: "#0a0a0a",
           fontFamily: "'JetBrains Mono', monospace",
-          backgroundImage: wallpaper.background,
-          backgroundSize: wallpaper.backgroundSize || undefined,
+          cursor: `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='20' viewBox='0 0 16 20'><path d='M1 1 L1 15 L5 11.5 L8.5 18 L10.5 17 L7 10.5 L12 10.5 Z' fill='${theme.primary}' stroke='#000' stroke-width='1' stroke-linejoin='round'/></svg>`)}") 1 1, default`,
+          ...(customWallpaperUrl
+            ? { backgroundImage: `url(${customWallpaperUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
+            : { backgroundImage: wallpaper.background, backgroundSize: wallpaper.backgroundSize || undefined }),
         }}
         onMouseDown={handleFirstInteraction}
         onKeyDown={handleFirstInteraction}
@@ -567,7 +632,7 @@ export default function SysPage() {
         )}
 
         {/* Desktop area */}
-        <div ref={desktopRef} className="absolute inset-0 pb-12" onMouseDown={handleDesktopMouseDown}>
+        <div ref={desktopRef} className="absolute inset-0 pb-12" onMouseDown={handleDesktopMouseDown} onContextMenu={handleDesktopContextMenu}>
           {/* Desktop icons */}
           {DESKTOP_ICONS.map(({ app, x, y }) => {
             const isSelected = selectedIcons.has(app);
@@ -607,29 +672,161 @@ export default function SysPage() {
             );
           })}
 
-          {/* Windows */}
-          {windows.map(
-            (win) =>
-              !win.minimized && (
-                <Window
-                  key={win.id}
-                  win={win}
-                  onClose={() => closeWindow(win.id)}
-                  onMinimize={() => minimizeWindow(win.id)}
-                  onToggleMaximize={() => toggleMaximize(win.id)}
-                  onFocus={() => focusWindow(win.id)}
-                  onMove={(x, y) => updateWindow(win.id, { x, y, maximized: false })}
-                  onResize={(w, h, x, y) => updateWindow(win.id, { w, h, maximized: false, ...(x !== undefined && { x }), ...(y !== undefined && { y }) })}
-                  onSnap={(snap) => updateWindow(win.id, { ...snap, maximized: snap.y === 0 && snap.x === 0 && snap.w === window.innerWidth, preMaximized: { x: win.x, y: win.y, w: win.w, h: win.h } })}
-                />
-              )
-          )}
+          {/* Windows — always rendered (display:none when minimized) so MusicApp stays alive */}
+          {windows.map((win) => (
+            <Window
+              key={win.id}
+              win={win}
+              onClose={() => closeWindow(win.id)}
+              onMinimize={() => minimizeWindow(win.id)}
+              onToggleMaximize={() => toggleMaximize(win.id)}
+              onFocus={() => focusWindow(win.id)}
+              onMove={(x, y) => updateWindow(win.id, { x, y, maximized: false })}
+              onResize={(w, h, x, y) => updateWindow(win.id, { w, h, maximized: false, ...(x !== undefined && { x }), ...(y !== undefined && { y }) })}
+              onSnap={(snap) => updateWindow(win.id, { ...snap, maximized: snap.y === 0 && snap.x === 0 && snap.w === window.innerWidth, preMaximized: { x: win.x, y: win.y, w: win.w, h: win.h } })}
+            />
+          ))}
         </div>
+
+        {/* Hidden file input for wallpaper upload */}
+        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleWallpaperUpload} />
+
+        {/* Desktop context menu */}
+        {ctxMenu && (
+          <div
+            className="fixed z-[9998] min-w-[200px] py-1 bg-[#111]/95 backdrop-blur-md border border-[#222]"
+            style={{
+              left: Math.min(ctxMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1920) - 220),
+              top: Math.min(ctxMenu.y, (typeof window !== "undefined" ? window.innerHeight : 1080) - 300),
+              boxShadow: `0 8px 32px rgba(0,0,0,0.6), 0 0 1px rgba(${theme.primaryRgb},0.15)`,
+            }}
+          >
+            {/* Open terminal */}
+            <button
+              className="w-full px-3 py-2 text-left text-[11px] text-[#ccc] hover:bg-white/10 transition flex items-center gap-2.5 cursor-pointer"
+              onClick={() => { openApp("terminal"); setCtxMenu(null); }}
+            >
+              <span className="text-sm w-5 text-center">⌘</span> Open Terminal
+            </button>
+
+            <div className="h-px bg-[#222] mx-2 my-0.5" />
+
+            {/* Change wallpaper submenu */}
+            <div
+              className="relative"
+              onMouseEnter={() => { if (ctxSubTimeout.current) clearTimeout(ctxSubTimeout.current); setCtxSub("wallpaper"); }}
+              onMouseLeave={() => { ctxSubTimeout.current = setTimeout(() => setCtxSub((s) => s === "wallpaper" ? null : s), 150); }}
+            >
+              <div
+                className={`w-full px-3 py-2 text-[11px] text-[#ccc] transition flex items-center gap-2.5 cursor-default ${ctxSub === "wallpaper" ? "bg-white/10" : "hover:bg-white/10"}`}
+              >
+                <span className="text-sm w-5 text-center">🖼</span> Change Wallpaper
+                <span className="ml-auto text-[9px] text-[#555]">▶</span>
+              </div>
+              {ctxSub === "wallpaper" && (
+                <div
+                  className="absolute left-full top-0 min-w-[180px] py-1 bg-[#111]/95 backdrop-blur-md border border-[#222]"
+                  style={{ boxShadow: `0 8px 32px rgba(0,0,0,0.6)` }}
+                  onMouseEnter={() => { if (ctxSubTimeout.current) clearTimeout(ctxSubTimeout.current); }}
+                  onMouseLeave={() => { ctxSubTimeout.current = setTimeout(() => setCtxSub((s) => s === "wallpaper" ? null : s), 150); }}
+                >
+                  {/* Upload custom */}
+                  <button
+                    className="w-full px-3 py-2 text-left text-[11px] hover:bg-white/10 transition flex items-center gap-2.5 cursor-pointer"
+                    style={{ color: theme.primary }}
+                    onClick={() => { fileInputRef.current?.click(); }}
+                  >
+                    <span className="text-sm w-5 text-center">📁</span> Upload Image...
+                  </button>
+                  {customWallpaperUrl && (
+                    <button
+                      className="w-full px-3 py-2 text-left text-[11px] text-[#f87171] hover:bg-white/10 transition flex items-center gap-2.5 cursor-pointer"
+                      onClick={() => { setCustomWallpaperUrl(null); setCtxMenu(null); setCtxSub(null); }}
+                    >
+                      <span className="text-sm w-5 text-center">✕</span> Remove Custom
+                    </button>
+                  )}
+                  <div className="h-px bg-[#222] mx-2 my-0.5" />
+                  {/* Preset wallpapers */}
+                  {Object.entries(WALLPAPER_PRESETS).map(([key, preset]) => (
+                    <button
+                      key={key}
+                      className="w-full px-3 py-2 text-left text-[11px] text-[#ccc] hover:bg-white/10 transition flex items-center gap-2.5 cursor-pointer"
+                      style={{ color: wallpaperPreset === key && !customWallpaperUrl ? theme.primary : undefined }}
+                      onClick={() => { setCustomWallpaperUrl(null); setWallpaper(key); setCtxMenu(null); setCtxSub(null); }}
+                    >
+                      <span className="text-sm w-5 text-center">{wallpaperPreset === key && !customWallpaperUrl ? "●" : "○"}</span> {preset.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Change theme submenu */}
+            <div
+              className="relative"
+              onMouseEnter={() => { if (ctxSubTimeout.current) clearTimeout(ctxSubTimeout.current); setCtxSub("theme"); }}
+              onMouseLeave={() => { ctxSubTimeout.current = setTimeout(() => setCtxSub((s) => s === "theme" ? null : s), 150); }}
+            >
+              <div
+                className={`w-full px-3 py-2 text-[11px] text-[#ccc] transition flex items-center gap-2.5 cursor-default ${ctxSub === "theme" ? "bg-white/10" : "hover:bg-white/10"}`}
+              >
+                <span className="text-sm w-5 text-center">🎨</span> Change Theme
+                <span className="ml-auto text-[9px] text-[#555]">▶</span>
+              </div>
+              {ctxSub === "theme" && (
+                <div
+                  className="absolute left-full top-0 min-w-[160px] py-1 bg-[#111]/95 backdrop-blur-md border border-[#222]"
+                  style={{ boxShadow: `0 8px 32px rgba(0,0,0,0.6)` }}
+                  onMouseEnter={() => { if (ctxSubTimeout.current) clearTimeout(ctxSubTimeout.current); }}
+                  onMouseLeave={() => { ctxSubTimeout.current = setTimeout(() => setCtxSub((s) => s === "theme" ? null : s), 150); }}
+                >
+                  {Object.entries(allThemes).map(([id, t]) => (
+                    <button
+                      key={id}
+                      className="w-full px-3 py-2 text-left text-[11px] text-[#ccc] hover:bg-white/10 transition flex items-center gap-2.5 cursor-pointer"
+                      style={{ color: themeId === id ? theme.primary : undefined }}
+                      onClick={() => { setThemeId(id); setCtxMenu(null); setCtxSub(null); }}
+                    >
+                      <span className="w-3 h-3 rounded-full shrink-0" style={{ background: `linear-gradient(135deg, ${t.primary}, ${t.secondary})` }} />
+                      {t.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="h-px bg-[#222] mx-2 my-0.5" />
+
+            {/* About */}
+            <button
+              className="w-full px-3 py-2 text-left text-[11px] text-[#ccc] hover:bg-white/10 transition flex items-center gap-2.5 cursor-pointer"
+              onClick={() => { openApp("about"); setCtxMenu(null); }}
+            >
+              <span className="text-sm w-5 text-center">ℹ</span> About
+            </button>
+          </div>
+        )}
 
         {/* Taskbar */}
         <Taskbar windows={windows} onFocus={focusWindow} onOpen={openApp} />
+
+        {/* Mini player — shown when Music window is minimized */}
+        {minimizedMusicWin && miniMusicState && (
+          <MiniPlayer
+            isPlaying={miniMusicState.isPlaying}
+            currentTrack={miniMusicState.currentTrack}
+            progress={miniMusicState.progress}
+            duration={miniMusicState.duration}
+            onTogglePlay={() => musicControlsRef.current?.togglePlay()}
+            onPrev={() => musicControlsRef.current?.prev()}
+            onNext={() => musicControlsRef.current?.next()}
+            onRestore={() => focusWindow(minimizedMusicWin.id)}
+          />
+        )}
       </div>
     </ThemeContext.Provider>
+    </MusicSyncContext.Provider>
   );
 }
 
@@ -840,6 +1037,9 @@ function Window({
         width: win.w,
         height: win.h,
         zIndex: win.zIndex,
+        ...(win.minimized && !win.minimizing && !win.restoring
+          ? { display: "none" as const }
+          : {}),
         ...(win.minimizing || win.restoring
           ? {
               transform: minimizeTransform || "none",
@@ -1892,6 +2092,208 @@ function Taskbar({
   );
 }
 
+// ─── Mini Player (taskbar widget) ────────────────────────────────────────────
+
+const MINI_PLAYER_W = 300;
+const MINI_PLAYER_GRID = 192;
+const MINI_PLAYER_TASKBAR_H = 40;
+
+function MiniPlayer({
+  isPlaying,
+  currentTrack,
+  progress,
+  duration,
+  onTogglePlay,
+  onPrev,
+  onNext,
+  onRestore,
+}: {
+  isPlaying: boolean;
+  currentTrack: MusicTrack | null;
+  progress: number;
+  duration: number;
+  onTogglePlay: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+  onRestore: () => void;
+}) {
+  const { theme } = useContext(ThemeContext);
+  const progressPct = duration > 0 ? (progress / duration) * 100 : 0;
+
+  // Snap to grid points + screen edges, pick nearest
+  const snapToGrid = (v: number, max: number) => {
+    const points = [0];
+    for (let p = MINI_PLAYER_GRID; p < max; p += MINI_PLAYER_GRID) points.push(p);
+    points.push(max);
+    let best = points[0], bestDist = Math.abs(v - best);
+    for (const p of points) {
+      const d = Math.abs(v - p);
+      if (d < bestDist) { best = p; bestDist = d; }
+    }
+    return best;
+  };
+
+  const DRAG_THRESHOLD = 5;
+
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number; active: boolean } | null>(null);
+  const wasDragRef = useRef(false);
+  const widgetRef = useRef<HTMLDivElement>(null);
+
+  // Default position: bottom-right above taskbar
+  const resolvedPos = pos ?? {
+    x: (typeof window !== "undefined" ? window.innerWidth : 1920) - MINI_PLAYER_W,
+    y: (typeof window !== "undefined" ? window.innerHeight : 1080) - MINI_PLAYER_TASKBAR_H - (widgetRef.current?.offsetHeight ?? 140),
+  };
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const dx = e.clientX - d.startX;
+      const dy = e.clientY - d.startY;
+      // Only start moving after exceeding threshold
+      if (!d.active && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+      d.active = true;
+      setDragging(true);
+      const rawX = d.origX + dx;
+      const rawY = d.origY + dy;
+      const widgetH = widgetRef.current?.offsetHeight ?? 140;
+      const maxX = window.innerWidth - MINI_PLAYER_W;
+      const maxY = window.innerHeight - MINI_PLAYER_TASKBAR_H - widgetH;
+      setPos({
+        x: Math.max(0, Math.min(rawX, maxX)),
+        y: Math.max(0, Math.min(rawY, maxY)),
+      });
+    };
+    const onMouseUp = () => {
+      if (!dragRef.current) return;
+      wasDragRef.current = dragRef.current.active;
+      const wasDrag = dragRef.current.active;
+      dragRef.current = null;
+      setDragging(false);
+      // Reset wasDragRef after click event has had a chance to fire
+      requestAnimationFrame(() => { wasDragRef.current = false; });
+      if (wasDrag) {
+        // Snap to grid on release
+        setPos((prev) => {
+          if (!prev) return prev;
+          const widgetH = widgetRef.current?.offsetHeight ?? 140;
+          const maxX = window.innerWidth - MINI_PLAYER_W;
+          const maxY = window.innerHeight - MINI_PLAYER_TASKBAR_H - widgetH;
+          return {
+            x: snapToGrid(prev.x, maxX),
+            y: snapToGrid(prev.y, maxY),
+          };
+        });
+      }
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDragStart = (e: React.MouseEvent) => {
+    // Don't interfere with button clicks initially — just record start
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: resolvedPos.x,
+      origY: resolvedPos.y,
+      active: false,
+    };
+  };
+
+  return (
+    <div
+      ref={widgetRef}
+      className="fixed z-[9999] w-[300px] overflow-hidden rounded-xl select-none cursor-grab active:cursor-grabbing"
+      style={{
+        left: resolvedPos.x,
+        top: resolvedPos.y,
+        boxShadow: `0 12px 40px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.06)`,
+        transition: dragging ? "none" : "left 0.2s ease, top 0.2s ease",
+      }}
+      onMouseDown={handleDragStart}
+      onClickCapture={(e) => { if (wasDragRef.current) { e.stopPropagation(); e.preventDefault(); } }}
+    >
+      <div className="relative">
+        {/* Thumbnail background — blurred + translucent */}
+        {currentTrack?.thumbnail && (
+          <img
+            src={currentTrack.thumbnail}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover scale-125 pointer-events-none"
+            style={{ opacity: 0.4 }}
+          />
+        )}
+        <div className="absolute inset-0 backdrop-blur-lg bg-black/40 pointer-events-none" />
+
+        <div className="relative flex flex-col gap-3 px-4 pt-4 pb-3">
+          {/* Track info — click to restore */}
+          <button
+            className="text-left cursor-pointer"
+            onClick={onRestore}
+            title="Open player"
+          >
+            <div className="text-[12px] text-white font-medium truncate leading-tight drop-shadow-md">
+              {currentTrack?.title || "No track"}
+            </div>
+            <div className="text-[10px] text-white/60 truncate mt-0.5 drop-shadow-sm">
+              {currentTrack?.channel || ""}
+            </div>
+          </button>
+
+          {/* Progress bar */}
+          <div className="w-full">
+            <div className="w-full h-[3px] bg-white/15 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-none"
+                style={{
+                  width: `${progressPct}%`,
+                  background: theme.primary,
+                  boxShadow: `0 0 8px rgba(${theme.primaryRgb},0.5)`,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center justify-center gap-4">
+            <button
+              className="w-8 h-8 flex items-center justify-center text-white/70 hover:text-white transition cursor-pointer"
+              onClick={onPrev}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+            </button>
+            <button
+              className="w-11 h-11 flex items-center justify-center transition hover:scale-105 cursor-pointer rounded-full bg-white/20 backdrop-blur-sm"
+              style={{ boxShadow: `0 0 20px rgba(${theme.primaryRgb},0.25)` }}
+              onClick={onTogglePlay}
+            >
+              {isPlaying ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+              )}
+            </button>
+            <button
+              className="w-8 h-8 flex items-center justify-center text-white/70 hover:text-white transition cursor-pointer"
+              onClick={onNext}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Music App ───────────────────────────────────────────────────────────────
 
 declare global {
@@ -1910,6 +2312,7 @@ interface YTPlayer {
   pauseVideo(): void;
   seekTo(seconds: number, allowSeekAhead: boolean): void;
   setVolume(vol: number): void;
+  getPlayerState(): number;
   getCurrentTime(): number;
   getDuration(): number;
   destroy(): void;
@@ -1925,15 +2328,9 @@ interface YTPlaylistItem {
   contentDetails: { itemCount: number };
 }
 
-interface MusicTrack {
-  id: string;
-  title: string;
-  channel: string;
-  thumbnail: string;
-}
-
 function MusicApp() {
   const { theme } = useContext(ThemeContext);
+  const musicSync = useContext(MusicSyncContext);
 
   type Status = "checking" | "disconnected" | "ready" | "error";
   const [status, setStatus] = useState<Status>("checking");
@@ -1948,6 +2345,7 @@ function MusicApp() {
   const [volume, setVolume] = useState(80);
   const [view, setView] = useState<"player" | "playlist">("player");
   const [loadingTracks, setLoadingTracks] = useState(false);
+  const [defaultPlaylistId, setDefaultPlaylistId] = useState<string | null>(null);
 
   const playerRef = useRef<YTPlayer | null>(null);
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1960,18 +2358,47 @@ function MusicApp() {
   useEffect(() => { tracksRef.current = tracks; }, [tracks]);
   useEffect(() => { volumeRef.current = volume; }, [volume]);
 
-  // Check connection on mount
+  // Sync state to mini-player via context
+  const currentTrack = tracks[currentIndex] ?? null;
+  useEffect(() => { musicSync.reportState({ isPlaying, currentTrack, progress, duration }); }, [isPlaying, currentTrack, progress, duration, musicSync]);
+
+  // Check connection on mount + load saved default playlist
   useEffect(() => {
-    fetch("/api/youtube/playlists")
-      .then(async (res) => {
-        if (res.status === 401) { setStatus("disconnected"); return; }
-        if (!res.ok) { setStatus("error"); return; }
-        const data = await res.json();
-        setPlaylists(data.items || []);
-        setStatus("ready");
-      })
-      .catch(() => setStatus("error"));
-  }, []);
+    const savedDefault = localStorage.getItem("jcos_yt_default_playlist");
+    if (savedDefault) {
+      try {
+        const { id, title } = JSON.parse(savedDefault);
+        setDefaultPlaylistId(id);
+        fetch("/api/youtube/playlists")
+          .then(async (res) => {
+            if (res.status === 401) { setStatus("disconnected"); return; }
+            if (!res.ok) { setStatus("error"); return; }
+            const data = await res.json();
+            setPlaylists(data.items || []);
+            setStatus("ready");
+            loadPlaylist(id, title);
+          })
+          .catch(() => setStatus("error"));
+      } catch {
+        localStorage.removeItem("jcos_yt_default_playlist");
+        fetchPlaylists();
+      }
+    } else {
+      fetchPlaylists();
+    }
+
+    function fetchPlaylists() {
+      fetch("/api/youtube/playlists")
+        .then(async (res) => {
+          if (res.status === 401) { setStatus("disconnected"); return; }
+          if (!res.ok) { setStatus("error"); return; }
+          const data = await res.json();
+          setPlaylists(data.items || []);
+          setStatus("ready");
+        })
+        .catch(() => setStatus("error"));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load YouTube IFrame API once + create player container outside React tree
   useEffect(() => {
@@ -1987,10 +2414,19 @@ function MusicApp() {
     }
 
     return () => {
-      document.body.removeChild(container);
+      // Destroy player first, then remove container — order matters
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+      try { playerRef.current?.destroy(); } catch { /* ignore */ }
+      playerRef.current = null;
+      if (document.body.contains(container)) {
+        document.body.removeChild(container);
+      }
       playerContainerRef.current = null;
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const clearProgressInterval = useCallback(() => {
     if (progressIntervalRef.current) {
@@ -2052,6 +2488,9 @@ function MusicApp() {
     setSelectedPlaylistId(playlistId);
     setSelectedPlaylistTitle(title);
     setView("player");
+    // Remember last playlist so it auto-loads next time
+    localStorage.setItem("jcos_yt_default_playlist", JSON.stringify({ id: playlistId, title }));
+    setDefaultPlaylistId(playlistId);
     try {
       const res = await fetch(`/api/youtube/playlist?id=${encodeURIComponent(playlistId)}`);
       const data = await res.json();
@@ -2086,20 +2525,32 @@ function MusicApp() {
     }
   };
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      clearProgressInterval();
-      playerRef.current?.destroy();
-      playerRef.current = null;
-    };
-  }, [clearProgressInterval]);
 
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     if (!playerRef.current) return;
-    if (isPlaying) playerRef.current.pauseVideo();
-    else playerRef.current.playVideo();
-  };
+    if (playerRef.current.getPlayerState?.() === window.YT?.PlayerState?.PLAYING) {
+      playerRef.current.pauseVideo();
+    } else {
+      playerRef.current.playVideo();
+    }
+  }, []);
+
+  const playNext = useCallback(() => {
+    const next = (currentIndexRef.current + 1) % tracksRef.current.length;
+    const track = tracksRef.current[next];
+    if (track) { playerRef.current?.loadVideoById(track.id); setProgress(0); }
+    setCurrentIndex(next);
+  }, []);
+
+  const playPrev = useCallback(() => {
+    const prev = (currentIndexRef.current - 1 + tracksRef.current.length) % tracksRef.current.length;
+    const track = tracksRef.current[prev];
+    if (track) { playerRef.current?.loadVideoById(track.id); setProgress(0); }
+    setCurrentIndex(prev);
+  }, []);
+
+  // Register controls for mini-player
+  useEffect(() => { musicSync.registerControls({ togglePlay, next: playNext, prev: playPrev }); }, [togglePlay, playNext, playPrev, musicSync]);
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!playerRef.current || !duration) return;
@@ -2130,7 +2581,6 @@ function MusicApp() {
     return `${m}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
   };
 
-  const currentTrack = tracks[currentIndex];
   const progressPct = duration > 0 ? (progress / duration) * 100 : 0;
 
   // ── Render helpers ──────────────────────────────────────────────────────────
@@ -2244,7 +2694,30 @@ function MusicApp() {
                     <div className="text-[11px] text-[#aaa] truncate">{pl.snippet.title}</div>
                     <div className="text-[9px] text-[#444]">{pl.contentDetails?.itemCount ?? "?"} videos</div>
                   </div>
-                  <span style={{ color: theme.primary }} className="text-[10px] shrink-0">▶</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      className="text-[9px] px-1.5 py-0.5 border transition cursor-pointer"
+                      style={{
+                        borderColor: defaultPlaylistId === pl.id ? theme.primary : "#2a2a2a",
+                        color: defaultPlaylistId === pl.id ? theme.primary : "#444",
+                      }}
+                      title={defaultPlaylistId === pl.id ? "Clear default" : "Set as default"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (defaultPlaylistId === pl.id) {
+                          localStorage.removeItem("jcos_yt_default_playlist");
+                          setDefaultPlaylistId(null);
+                        } else {
+                          const val = JSON.stringify({ id: pl.id, title: pl.snippet.title });
+                          localStorage.setItem("jcos_yt_default_playlist", val);
+                          setDefaultPlaylistId(pl.id);
+                        }
+                      }}
+                    >
+                      {defaultPlaylistId === pl.id ? "★ default" : "☆"}
+                    </button>
+                    <span style={{ color: theme.primary }} className="text-[10px]">▶</span>
+                  </div>
                 </button>
               ))}
             </div>
@@ -2353,12 +2826,7 @@ function MusicApp() {
                 </button>
                 <button
                   className="text-[#555] hover:brightness-200 transition cursor-pointer text-lg leading-none"
-                  onClick={() => {
-                    const next = (currentIndex + 1) % tracks.length;
-                    const track = tracks[next];
-                    if (track) { playerRef.current?.loadVideoById(track.id); setProgress(0); }
-                    setCurrentIndex(next);
-                  }}
+                  onClick={playNext}
                 >
                   ⏭
                 </button>

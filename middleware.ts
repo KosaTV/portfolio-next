@@ -14,6 +14,11 @@ export function middleware(request: NextRequest) {
 		return NextResponse.next();
 	}
 
+	// Skip tracking in development
+	if (process.env.NODE_ENV === "development") {
+		return NextResponse.next();
+	}
+
 	const ip =
 		request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
 		request.headers.get("x-real-ip") ||
