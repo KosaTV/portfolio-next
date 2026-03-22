@@ -6,7 +6,7 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
 
   if (!code) {
-    return NextResponse.redirect(`${base}/0x72?yt=error`);
+    return NextResponse.redirect(`${base}/${process.env.ADMIN_PATH}?yt=error`);
   }
 
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   });
 
   if (!tokenRes.ok) {
-    return NextResponse.redirect(`${base}/0x72?yt=error`);
+    return NextResponse.redirect(`${base}/${process.env.ADMIN_PATH}?yt=error`);
   }
 
   const { access_token, refresh_token, expires_in } = await tokenRes.json();
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     expiresAt: Date.now() + expires_in * 1000,
   });
 
-  const res = NextResponse.redirect(`${base}/0x72?yt=ok`);
+  const res = NextResponse.redirect(`${base}/${process.env.ADMIN_PATH}?yt=ok`);
   setCookieOnResponse(res, jwt);
   return res;
 }
