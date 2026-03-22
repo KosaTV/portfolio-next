@@ -164,8 +164,10 @@ export default function LoadingScreen() {
         ...prev,
         { text: "✓ Root access granted. Entering system...", color: "#00f0d4" },
       ]);
+      const redirectRes = await fetch("/api/auth/redirect");
+      const { path } = await redirectRes.json();
       setTimeout(() => {
-        window.location.href = "/0x72";
+        window.location.href = path;
       }, 1000);
     } catch {
       setHistory((prev) => [
